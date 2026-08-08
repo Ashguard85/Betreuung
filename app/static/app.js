@@ -106,7 +106,7 @@ function renderYear(){
   const year=Number(qs("#yearSelect").value);
   const months=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
   const byDay=new Map(entries.filter(e=>e.day.startsWith(String(year))).map(e=>[e.day,e]));
-  let out='<table class="year"><thead><tr><th>Tag</th>'+months.map(m=>`<th>${m}</th>`).join("")+'</tr></thead><tbody>';
+  let out='<table class="year"><colgroup><col class="day-col">'+months.map(()=>'<col class="month-col">').join("")+'</colgroup><thead><tr><th>Tag</th>'+months.map(m=>`<th>${m}</th>`).join("")+'</tr></thead><tbody>';
   for(let day=1;day<=31;day++){
     out+=`<tr><td>${day}</td>`;
     for(let month=0;month<12;month++){
@@ -116,7 +116,8 @@ function renderYear(){
       const iso=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
       const e=byDay.get(iso);
       const weekend=d.getDay()===0||d.getDay()===6;
-      out+=`<td class="${weekend?"weekend":""}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}">${e?`<span class="entry-pill" style="background:${esc(e.color)}">${esc(e.person)}</span>`:""}</td>`;
+      const fill=e?`<div class="entry-fill" style="background:${esc(e.color)}"><span>${esc(e.person)}</span></div>`:"";
+      out+=`<td class="${weekend?"weekend":""}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}">${fill}</td>`;
     }
     out+='</tr>';
   }

@@ -94,6 +94,14 @@ function renderList(){
   if(search) arr=arr.filter(e=>(e.note||"").toLowerCase().includes(search)||e.person.toLowerCase().includes(search));
   arr.sort((a,b)=>a.day.localeCompare(b.day));
   qs("#fullList").innerHTML=arr.length?arr.map(itemHtml).join(""):'<div class="small">Keine Einträge.</div>';
+
+  const params=new URLSearchParams();
+  if(year) params.set("year",year);
+  if(person) params.set("person",person);
+  qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
+  qs("#listExportHint").textContent=person
+    ? `${arr.length} Einträge für ${person} im Jahr ${year}`
+    : `${arr.length} Einträge im Jahr ${year}`;
 }
 function renderStats(){
   const today=isoToday();
@@ -129,7 +137,10 @@ function renderYear(){
 async function renderStatsByPerson(){
   const year=qs("#yearSelect").value;
   const data=await api(`/api/stats?year=${encodeURIComponent(year)}`);
-  qs("#personStats").innerHTML=data.per_person.length?data.per_person.map(x=>`<span class="stat-chip"><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.name)}: ${x.count}</span>`).join(""):'<span class="small">Noch keine Einträge.</span>';
+  qs("#personStats").innerHTML=data.per_person.length?data.per_person.map(x=>{
+    const href=`/export.csv?year=${encodeURIComponent(year)}&person=${encodeURIComponent(x.name)}`;
+    return `<a class="stat-chip stat-chip-link" href="${href}" title="Liste von ${esc(x.name)} als CSV exportieren"><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.name)}: ${x.count}<span class="export-mark">CSV ↓</span></a>`;
+  }).join(""):'<span class="small">Noch keine Einträge.</span>';
 }
 function renderAll(){ renderStats(); renderNext(); renderList(); renderYear(); renderStatsByPerson(); }
 

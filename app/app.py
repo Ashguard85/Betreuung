@@ -380,15 +380,39 @@ def api_entries_delete(entry_id):
 @login_required
 def export_csv():
     year = request.args.get("year", "").strip()
-    rows = entry_rows("e.day LIKE ?", (f"{year}-%",)) if year else entry_rows()
+    person = request.args.get("person", "").strip()
+
+    clauses = []
+    params = []
+    if year:
+        clauses.append("e.day LIKE ?")
+        params.append(f"{year}-%")
+    if person:
+        clauses.append("p.name = ?")
+        params.append(person)
+
+    rows = entry_rows(" AND ".join(clauses), tuple(params)) if clauses else entry_rows()
+
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(["Datum", "Betreuung", "Bemerkung"])
     for r in rows:
         w.writerow([r["day"], r["person"], r["note"]])
-    filename = f"betreuung-{year or 'alle'}.csv"
+
+    safe_person = "".join(c if c.isalnum() or c in "-_" else "-" for c in person).strip("-")
+    parts = ["betreuung"]
+    if safe_person:
+        parts.append(safe_person)
+    if year:
+        parts.append(year)
+    if not safe_person and not year:
+        parts.append("alle")
+    filename = "-".join(parts) + ".csv"
+
+    # UTF-8 BOM makes umlauts work reliably when opened directly in Excel.
+    body = "\ufeff" + buf.getvalue()
     return Response(
-        buf.getvalue(),
+        body,
         mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

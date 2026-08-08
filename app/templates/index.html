@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#f7f7f2" />
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg">
+  <link rel="stylesheet" href="/static/app.css">
+  <title>{{ title }}</title>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">N</div>
+      <div><h1>{{ title }}</h1><p id="subtitle">Familienplan</p></div>
+    </div>
+    <form method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>
+  </header>
+
+  <section id="homePage" class="page active">
+    <div class="hero">
+      <h2>Wer hütet?</h2>
+      <p>Datum wählen, Betreuung antippen, speichern. Der Rest entsteht automatisch.</p>
+    </div>
+
+    <div class="quickstats">
+      <div class="stat"><strong id="statUpcoming">0</strong><span>kommend</span></div>
+      <div class="stat"><strong id="statPeople">0</strong><span>Personen</span></div>
+      <div class="stat"><strong id="statYear">0</strong><span>dieses Jahr</span></div>
+    </div>
+
+    <div class="grid two">
+      <div class="card">
+        <h3>Schnell eintragen</h3>
+        <label class="label">Datum</label>
+        <input id="quickDate" class="input" type="date"/>
+        <div class="space"></div>
+        <label class="label">Betreuung</label>
+        <div class="person-grid" id="quickPeople"></div>
+        <div class="space"></div>
+        <label class="label">Bemerkung <span class="small">(optional)</span></label>
+        <input id="quickNote" class="input" placeholder="z. B. Ferien …"/>
+        <div class="space"></div>
+        <button class="primary" id="quickSave">Speichern</button>
+      </div>
+
+      <div class="card">
+        <div class="row"><h3>Nächste Betreuung</h3><span class="spacer"></span><button class="secondary" onclick="showPage('list')">Alle</button></div>
+        <div id="nextList" class="list"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="listPage" class="page">
+    <div class="hero">
+      <h2>Fortlaufende Liste</h2>
+      <p>Wie euer heutiges Eingabeblatt, nur fürs Smartphone optimiert.</p>
+    </div>
+    <div class="card">
+      <div class="filters">
+        <select id="filterPerson" class="input"></select>
+        <select id="filterYear" class="input"></select>
+      </div>
+      <input id="filterSearch" class="input" placeholder="Suchen …"/>
+      <div class="space"></div>
+      <div id="fullList" class="list"></div>
+    </div>
+  </section>
+
+  <section id="yearPage" class="page">
+    <div class="hero">
+      <h2>Jahresübersicht</h2>
+      <p>Monate horizontal, Tage vertikal, Wochenenden automatisch markiert.</p>
+    </div>
+    <div class="year-toolbar">
+      <select id="yearSelect" class="input fit"></select>
+      <button class="secondary" onclick="window.print()">Drucken / PDF</button>
+      <a id="csvLink" class="secondary linkbtn" href="#">CSV</a>
+      <span class="spacer"></span>
+      <span class="small">↔ auf dem iPhone wischen</span>
+    </div>
+    <div id="yearTableWrap" class="year-wrap"></div>
+    <div id="legend" class="legend"></div>
+    <div class="card topgap">
+      <h3>Übersicht pro Person</h3>
+      <div id="personStats" class="stats-list"></div>
+    </div>
+  </section>
+
+  <section id="settingsPage" class="page">
+    <div class="hero">
+      <h2>Einstellungen</h2>
+      <p>Personen, Kalenderfeed, Import und Datensicherung.</p>
+    </div>
+
+    <div class="grid two">
+      <div class="card">
+        <h3>Betreuungspersonen</h3>
+        <div id="peopleSettings" class="people-settings"></div>
+        <div class="row topgap">
+          <input id="newPerson" class="input" placeholder="Neue Person">
+          <input id="newColor" type="color" value="#e8e8e8" class="color">
+          <button class="secondary" id="addPerson">+</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Kalender auf dem iPhone</h3>
+        <p class="small">Optionaler schreibgeschützter iCal-Abolink. Änderungen macht ihr weiterhin in dieser App.</p>
+        <div id="icalBox" class="pathbox">Nicht aktiviert.</div>
+        <button id="copyIcal" class="secondary topgap" style="display:none">Link kopieren</button>
+      </div>
+
+      <div class="card">
+        <h3>CSV Import / Export</h3>
+        <p class="small">Import erwartet Spalten <b>Datum;Betreuung;Bemerkung</b>. Bestehende Tage werden aktualisiert.</p>
+        <form id="importForm">
+          <input class="input" type="file" name="file" accept=".csv,text/csv" required>
+          <button class="secondary topgap" type="submit">CSV importieren</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Datensicherung</h3>
+        <p class="ok">● SQLite persistent</p>
+        <div id="dataFile" class="pathbox">/app/data/betreuung.sqlite</div>
+        <p class="small">Nach jeder Änderung erzeugt die App zusätzlich eine konsistente SQLite-Sicherung im Unterordner <b>backups</b>. Der gesamte Host-Ordner kann unabhängig vom Container gesichert werden.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<button class="fab" aria-label="Eintrag hinzufügen" onclick="openModal()">+</button>
+
+<nav class="bottomnav">
+  <div class="navinner">
+    <button class="navbtn active" data-page="home" onclick="showPage('home')"><span class="ico">⌂</span>Eintragen</button>
+    <button class="navbtn" data-page="list" onclick="showPage('list')"><span class="ico">≡</span>Liste</button>
+    <button class="navbtn" data-page="year" onclick="showPage('year')"><span class="ico">▦</span>Jahr</button>
+    <button class="navbtn" data-page="settings" onclick="showPage('settings')"><span class="ico">⚙</span>Setup</button>
+  </div>
+</nav>
+
+<div id="modalBack" class="modalback" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="row"><h3 id="modalTitle">Betreuung eintragen</h3><span class="spacer"></span><button class="close" onclick="closeModal()">✕</button></div>
+    <label class="label">Datum</label>
+    <input id="modalDate" class="input" type="date"/>
+    <div class="space"></div>
+    <label class="label">Betreuung</label>
+    <div class="person-grid" id="modalPeople"></div>
+    <div class="space"></div>
+    <label class="label">Bemerkung <span class="small">(optional)</span></label>
+    <textarea id="modalNote" class="input" placeholder="Optional"></textarea>
+    <div class="space"></div>
+    <button class="primary" id="modalSave">Speichern</button>
+    <button class="secondary danger full topgap" id="modalDelete" style="display:none">Eintrag löschen</button>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/static/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
+</script>
+</body>
+</html>

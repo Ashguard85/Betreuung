@@ -3,16 +3,27 @@ let entries = [];
 let selectedQuick = null;
 let selectedModal = null;
 let editingId = null;
+let reloadingForServiceWorker = false;
 
 const qs = s => document.querySelector(s);
 const qsa = s => [...document.querySelectorAll(s)];
 
 async function api(url, options={}) {
-  const res = await fetch(url, {
-    headers: {"Content-Type":"application/json", ...(options.headers||{})},
-    ...options
-  });
-  if (res.status === 401) { location.href="/login"; throw new Error("login"); }
+  const method=(options.method||"GET").toUpperCase();
+  if(method!=="GET" && !navigator.onLine) throw new Error("Offline - Änderungen sind nicht möglich");
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {"Content-Type":"application/json", ...(options.headers||{})},
+      ...options
+    });
+  } catch (err) {
+    throw new Error(navigator.onLine ? "Server nicht erreichbar" : "Offline - noch keine lokal gespeicherten Daten verfügbar");
+  }
+  if (res.status === 401) {
+    if(navigator.onLine) location.href="/login";
+    throw new Error("Anmeldung erforderlich");
+  }
   const type = res.headers.get("content-type") || "";
   const body = type.includes("json") ? await res.json() : await res.text();
   if (!res.ok) throw new Error(body.error || body || `HTTP ${res.status}`);
@@ -98,7 +109,9 @@ function renderList(){
   const params=new URLSearchParams();
   if(year) params.set("year",year);
   if(person) params.set("person",person);
+  if(search) params.set("q",search);
   qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
+  qs("#listPdfLink").href=`/export.pdf?${params.toString()}`;
   qs("#listExportHint").textContent=person
     ? `${arr.length} Einträge für ${person} im Jahr ${year}`
     : `${arr.length} Einträge im Jahr ${year}`;
@@ -138,9 +151,10 @@ async function renderStatsByPerson(){
   const year=qs("#yearSelect").value;
   const data=await api(`/api/stats?year=${encodeURIComponent(year)}`);
   qs("#personStats").innerHTML=data.per_person.length?data.per_person.map(x=>{
-    const href=`/export.csv?year=${encodeURIComponent(year)}&person=${encodeURIComponent(x.name)}`;
-    return `<a class="stat-chip stat-chip-link" href="${href}" title="Liste von ${esc(x.name)} als CSV exportieren"><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.name)}: ${x.count}<span class="export-mark">CSV ↓</span></a>`;
+    const base=`year=${encodeURIComponent(year)}&person=${encodeURIComponent(x.name)}`;
+    return `<span class="stat-chip"><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.name)}: ${x.count} <a class="stat-chip-link server-export" href="/export.csv?${base}" title="CSV exportieren">CSV</a> <a class="stat-chip-link server-export" href="/export.pdf?${base}" target="_blank" title="PDF öffnen">PDF</a></span>`;
   }).join(""):'<span class="small">Noch keine Einträge.</span>';
+  applyOnlineState();
 }
 function renderAll(){ renderStats(); renderNext(); renderList(); renderYear(); renderStatsByPerson(); }
 
@@ -199,6 +213,58 @@ async function loadConfig(){
   }
 }
 
+
+function applyOnlineState(){
+  const online=navigator.onLine;
+  document.body.classList.toggle("is-offline",!online);
+  const banner=qs("#offlineBanner");
+  if(banner) banner.hidden=online;
+  ["#quickSave","#modalSave","#modalDelete","#addPerson"].forEach(sel=>{
+    const el=qs(sel); if(el) el.disabled=!online;
+  });
+  qsa("#importForm input,#importForm button,#peopleSettings input,#peopleSettings button,#newPerson,#newColor").forEach(el=>el.disabled=!online);
+  qsa(".server-export").forEach(el=>{
+    el.setAttribute("aria-disabled",online?"false":"true");
+    el.tabIndex=online?0:-1;
+  });
+}
+
+async function refreshAfterReconnect(){
+  try{await loadPeople();await loadEntries();await loadConfig();toast("Wieder online - Daten aktualisiert");}
+  catch(e){toast(e.message);}
+}
+
+async function registerPwa(){
+  if(!("serviceWorker" in navigator)) return;
+  const hadController=Boolean(navigator.serviceWorker.controller);
+  try{
+    const reg=await navigator.serviceWorker.register("/service-worker.js",{scope:"/"});
+    await reg.update();
+    if(reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
+    reg.addEventListener("updatefound",()=>{
+      const worker=reg.installing;
+      if(!worker)return;
+      worker.addEventListener("statechange",()=>{
+        if(worker.state==="installed" && navigator.serviceWorker.controller){
+          worker.postMessage({type:"SKIP_WAITING"});
+        }
+      });
+    });
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{
+      if(!hadController || reloadingForServiceWorker)return;
+      reloadingForServiceWorker=true;
+      location.reload();
+    });
+  }catch(e){console.warn("PWA Service Worker konnte nicht registriert werden",e);}
+}
+
+window.addEventListener("offline",()=>{applyOnlineState();toast("Offline - Änderungen sind deaktiviert");});
+window.addEventListener("online",()=>{applyOnlineState();refreshAfterReconnect();});
+document.addEventListener("click",e=>{
+  const link=e.target.closest("a.server-export");
+  if(link && !navigator.onLine){e.preventDefault();toast("PDF/CSV Export benötigt eine Serververbindung");}
+});
+
 document.addEventListener("DOMContentLoaded", async ()=>{
   yearOptions(qs("#yearSelect"));
   yearOptions(qs("#filterYear"));
@@ -238,6 +304,11 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     try{await navigator.clipboard.writeText(qs("#copyIcal").dataset.url);toast("Kalenderlink kopiert");}
     catch{toast("Link markieren und kopieren");}
   });
+  const logoutForm=qs("#logoutForm");
+  if(logoutForm) logoutForm.addEventListener("submit",()=>{
+    if(navigator.serviceWorker?.controller) navigator.serviceWorker.controller.postMessage({type:"CLEAR_PRIVATE_DATA"});
+  });
+
   qs("#importForm").addEventListener("submit",async(e)=>{
     e.preventDefault();
     const fd=new FormData(e.target);
@@ -249,7 +320,10 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     }catch(err){toast(err.message);}
   });
 
-  await loadPeople();
-  await loadEntries();
-  await loadConfig();
+  applyOnlineState();
+  await registerPwa();
+  try{await loadPeople();}catch(e){toast(e.message);}
+  try{await loadEntries();}catch(e){toast(e.message);}
+  try{await loadConfig();}catch(e){if(navigator.onLine) toast(e.message);}
+  applyOnlineState();
 });

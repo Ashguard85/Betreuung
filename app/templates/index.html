@@ -4,20 +4,24 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#f7f7f2" />
+  <meta name="apple-mobile-web-app-title" content="Betreuung" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#305f57" />
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/static/icon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="stylesheet" href="/static/app.css">
   <title>{{ title }}</title>
 </head>
 <body>
+<div id="offlineBanner" class="offline-banner" hidden>Offline - letzter gespeicherter Stand. Änderungen sind deaktiviert.</div>
 <div class="app">
   <header class="topbar">
     <div class="brand">
       <div class="logo">N</div>
       <div><h1>{{ title }}</h1><p id="subtitle">Familienplan</p></div>
     </div>
-    <form method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>
+    <form id="logoutForm" method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>
   </header>
 
   <section id="homePage" class="page active">
@@ -66,7 +70,8 @@
       </div>
       <input id="filterSearch" class="input" placeholder="Suchen …"/>
       <div class="list-actions">
-        <a id="listCsvLink" class="secondary linkbtn" href="#">Gefilterte Liste als CSV</a>
+        <a id="listCsvLink" class="secondary linkbtn server-export" href="#">CSV</a>
+        <a id="listPdfLink" class="secondary linkbtn server-export" href="#" target="_blank">PDF</a>
         <span id="listExportHint" class="small"></span>
       </div>
       <div class="space"></div>
@@ -82,7 +87,7 @@
     <div class="year-toolbar">
       <select id="yearSelect" class="input fit"></select>
       <button class="secondary" onclick="window.print()">Drucken / PDF</button>
-      <a id="csvLink" class="secondary linkbtn" href="#">CSV</a>
+      <a id="csvLink" class="secondary linkbtn server-export" href="#">CSV</a>
       <span class="spacer"></span>
       <span class="small">↔ auf dem iPhone wischen</span>
     </div>
@@ -167,8 +172,5 @@
 
 <div id="toast" class="toast"></div>
 <script src="/static/app.js"></script>
-<script>
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
-</script>
 </body>
 </html>

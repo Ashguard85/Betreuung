@@ -69,3 +69,16 @@ Wenn `ICAL_TOKEN` gesetzt ist, zeigt die App unter **Setup** einen privaten iCal
 ## Reverse Proxy / HTTPS
 
 Wenn die App übers Internet erreichbar ist, unbedingt HTTPS über den vorhandenen Reverse Proxy (Synology Reverse Proxy, Nginx Proxy Manager, Traefik, Caddy etc.) verwenden.
+
+
+## PWA / Offline
+
+- installierbar auf iPhone/Android (HTTPS erforderlich)
+- Apple Touch Icon sowie 192/512 px PWA-Icons
+- Service Worker mit Versionswechsel und Cache-Bereinigung
+- zuletzt geladene Einträge/Personen sind offline lesbar
+- Änderungen und Server-Exporte werden offline deaktiviert
+
+## PDF Export
+
+Die Listenansicht kann nach Jahr, Person und Suchtext gefiltert und als CSV oder als echtes A4-PDF exportiert werden. Der PDF-Endpunkt lautet `/export.pdf`.

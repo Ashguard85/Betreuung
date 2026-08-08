@@ -8,14 +8,21 @@ import threading
 from datetime import datetime, date
 from functools import wraps
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 from flask import (
     Flask, Response, jsonify, redirect, render_template, request,
-    session, url_for
+    session, url_for, send_from_directory
 )
 
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
 APP_TITLE = os.getenv("APP_TITLE", "Noemi Betreuung")
-DATA_DIR = Path("/app/data")
+DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
 DB_PATH = DATA_DIR / "betreuung.sqlite"
 BACKUP_DIR = DATA_DIR / "backups"
 BACKUP_KEEP = max(5, int(os.getenv("BACKUP_KEEP", "50")))
@@ -152,7 +159,9 @@ def login():
 @app.post("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    response = redirect(url_for("login"))
+    response.headers["Clear-Site-Data"] = '"cache"'
+    return response
 
 
 @app.get("/")
@@ -163,32 +172,35 @@ def index():
 
 @app.get("/manifest.webmanifest")
 def manifest():
-    return jsonify({
+    response = jsonify({
+        "id": "/",
         "name": APP_TITLE,
         "short_name": "Betreuung",
+        "description": "Familienplan für Betreuungstage",
+        "lang": "de-CH",
         "start_url": "/",
+        "scope": "/",
         "display": "standalone",
+        "display_override": ["standalone", "minimal-ui"],
+        "orientation": "any",
         "background_color": "#f7f7f2",
         "theme_color": "#305f57",
         "icons": [
-            {"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
         ],
     })
+    response.mimetype = "application/manifest+json"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/service-worker.js")
 def service_worker():
-    js = """
-    const CACHE='betreuung-shell-v1';
-    self.addEventListener('install', e => e.waitUntil(
-      caches.open(CACHE).then(c => c.addAll(['/','/static/app.css','/static/app.js','/static/icon.svg']))
-    ));
-    self.addEventListener('fetch', e => {
-      if (e.request.method !== 'GET') return;
-      e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
-    });
-    """
-    return Response(js, mimetype="application/javascript")
+    response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 
 def valid_iso_day(value):
@@ -376,12 +388,7 @@ def api_entries_delete(entry_id):
     return jsonify({"ok": True})
 
 
-@app.get("/export.csv")
-@login_required
-def export_csv():
-    year = request.args.get("year", "").strip()
-    person = request.args.get("person", "").strip()
-
+def filtered_entry_rows(year="", person="", search=""):
     clauses = []
     params = []
     if year:
@@ -390,16 +397,15 @@ def export_csv():
     if person:
         clauses.append("p.name = ?")
         params.append(person)
+    if search:
+        clauses.append("(LOWER(e.note) LIKE ? OR LOWER(p.name) LIKE ?)")
+        needle = f"%{search.lower()}%"
+        params.extend([needle, needle])
+    return entry_rows(" AND ".join(clauses), tuple(params)) if clauses else entry_rows()
 
-    rows = entry_rows(" AND ".join(clauses), tuple(params)) if clauses else entry_rows()
 
-    buf = io.StringIO()
-    w = csv.writer(buf, delimiter=";")
-    w.writerow(["Datum", "Betreuung", "Bemerkung"])
-    for r in rows:
-        w.writerow([r["day"], r["person"], r["note"]])
-
-    safe_person = "".join(c if c.isalnum() or c in "-_" else "-" for c in person).strip("-")
+def export_filename(extension, year="", person=""):
+    safe_person = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "-" for c in person).strip("-")
     parts = ["betreuung"]
     if safe_person:
         parts.append(safe_person)
@@ -407,14 +413,156 @@ def export_csv():
         parts.append(year)
     if not safe_person and not year:
         parts.append("alle")
-    filename = "-".join(parts) + ".csv"
+    return "-".join(parts) + extension
 
-    # UTF-8 BOM makes umlauts work reliably when opened directly in Excel.
+
+@app.get("/export.csv")
+@login_required
+def export_csv():
+    year = request.args.get("year", "").strip()
+    person = request.args.get("person", "").strip()
+    search = request.args.get("q", "").strip()
+    rows = filtered_entry_rows(year, person, search)
+
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Datum", "Betreuung", "Bemerkung"])
+    for r in rows:
+        w.writerow([r["day"], r["person"], r["note"]])
+
     body = "\ufeff" + buf.getvalue()
     return Response(
         body,
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(".csv", year, person)}"'},
+    )
+
+
+@app.get("/export.pdf")
+@login_required
+def export_pdf():
+    year = request.args.get("year", "").strip()
+    person = request.args.get("person", "").strip()
+    search = request.args.get("q", "").strip()
+    rows = filtered_entry_rows(year, person, search)
+
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=A4,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=f"Betreuungsliste {person or 'Alle'} {year}".strip(),
+        author=APP_TITLE,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ListTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        leading=19,
+        textColor=colors.HexColor("#1e2524"),
+        spaceAfter=4 * mm,
+    )
+    meta_style = ParagraphStyle(
+        "ListMeta",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#68716f"),
+        spaceAfter=5 * mm,
+    )
+    cell_style = ParagraphStyle(
+        "Cell",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=10.5,
+        textColor=colors.HexColor("#1e2524"),
+    )
+    header_style = ParagraphStyle(
+        "Header",
+        parent=cell_style,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+
+    label = person or "Alle Betreuungspersonen"
+    if year:
+        label += f" - {year}"
+    if search:
+        label += f" - Filter: {search}"
+
+    story = [
+        Paragraph("Betreuungsliste", title_style),
+        Paragraph(f"{xml_escape(label)}<br/>{len(rows)} Betreuungstage", meta_style),
+    ]
+
+    data = [[
+        Paragraph("Datum", header_style),
+        Paragraph("Tag", header_style),
+        Paragraph("Betreuung", header_style),
+        Paragraph("Bemerkung", header_style),
+    ]]
+    weekdays = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+    row_colors = []
+    for idx, r in enumerate(rows, start=1):
+        day_obj = date.fromisoformat(r["day"])
+        data.append([
+            Paragraph(day_obj.strftime("%d.%m.%Y"), cell_style),
+            Paragraph(weekdays[day_obj.weekday()], cell_style),
+            Paragraph(xml_escape(r["person"]), cell_style),
+            Paragraph(xml_escape(r["note"] or ""), cell_style),
+        ])
+        try:
+            row_colors.append((idx, colors.HexColor(r["color"])))
+        except Exception:
+            row_colors.append((idx, colors.HexColor("#ececec")))
+
+    table = Table(
+        data,
+        colWidths=[29 * mm, 18 * mm, 43 * mm, 96 * mm],
+        repeatRows=1,
+        hAlign="LEFT",
+    )
+    table_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#305f57")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#dfe4e1")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for row_index, bg in row_colors:
+        table_style.append(("BACKGROUND", (2, row_index), (2, row_index), bg))
+    table.setStyle(TableStyle(table_style))
+    story.append(table)
+
+    def footer(canvas, doc_obj):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#68716f"))
+        canvas.drawString(12 * mm, 7 * mm, APP_TITLE)
+        canvas.drawRightString(A4[0] - 12 * mm, 7 * mm, f"Seite {doc_obj.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    pdf_bytes = output.getvalue()
+    output.close()
+    filename = export_filename(".pdf", year, person)
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
     )
 
 

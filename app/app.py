@@ -279,6 +279,42 @@ def index():
     return render_template("index.html", title=APP_TITLE, auth_enabled=AUTH_ENABLED)
 
 
+def _icon_response(filename):
+    response = send_from_directory(app.static_folder, filename, mimetype="image/png")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@app.get("/apple-touch-icon-v17.png")
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+def apple_touch_icon():
+    return _icon_response("apple-touch-icon-v17.png")
+
+
+@app.get("/pwa-icon-192-v17.png")
+def pwa_icon_192():
+    return _icon_response("pwa-icon-192-v17.png")
+
+
+@app.get("/pwa-icon-512-v17.png")
+def pwa_icon_512():
+    return _icon_response("pwa-icon-512-v17.png")
+
+
+@app.get("/pwa-icon-maskable-512-v17.png")
+def pwa_icon_maskable_512():
+    return _icon_response("pwa-icon-maskable-512-v17.png")
+
+
+@app.get("/favicon-v17.png")
+@app.get("/favicon.ico")
+def favicon_v17():
+    return _icon_response("favicon-v17.png")
+
+
 @app.get("/manifest.webmanifest")
 def manifest():
     response = jsonify({
@@ -295,9 +331,9 @@ def manifest():
         "background_color": "#f7f7f2",
         "theme_color": "#305f57",
         "icons": [
-            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-            {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+            {"src": "/pwa-icon-192-v17.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/pwa-icon-512-v17.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "/pwa-icon-maskable-512-v17.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
         ],
     })
     response.mimetype = "application/manifest+json"

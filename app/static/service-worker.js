@@ -1,4 +1,4 @@
-const VERSION = "betreuung-pwa-v16";
+const VERSION = "betreuung-pwa-v17";
 const STATIC_CACHE = `${VERSION}-static`;
 const DATA_CACHE = `${VERSION}-data`;
 const PAGE_CACHE = `${VERSION}-pages`;
@@ -6,11 +6,11 @@ const STATIC_ASSETS = [
   "/static/app.css",
   "/static/app.js",
   "/static/icon.svg",
-  "/static/favicon-64.png",
-  "/static/icon-192.png",
-  "/static/icon-512.png",
-  "/static/icon-maskable-512.png",
-  "/static/apple-touch-icon.png",
+  "/favicon-v17.png",
+  "/pwa-icon-192-v17.png",
+  "/pwa-icon-512-v17.png",
+  "/pwa-icon-maskable-512-v17.png",
+  "/apple-touch-icon-v17.png",
   "/static/offline.html",
   "/manifest.webmanifest"
 ];
@@ -81,7 +81,10 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  if(url.pathname.startsWith("/static/") || url.pathname==="/manifest.webmanifest"){
+  if(url.pathname.startsWith("/static/") || url.pathname==="/manifest.webmanifest" ||
+     url.pathname==="/apple-touch-icon-v17.png" || url.pathname==="/apple-touch-icon.png" ||
+     url.pathname==="/apple-touch-icon-precomposed.png" || url.pathname==="/favicon-v17.png" ||
+     url.pathname==="/favicon.ico" || url.pathname.startsWith("/pwa-icon-")){
     event.respondWith(staleWhileRevalidate(request));
   }
 });

@@ -8,8 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="theme-color" content="#305f57" />
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon-64.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon-v17.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v17.png">
+  <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-v17.png">
   <link rel="stylesheet" href="/static/app.css?v=10">
   <title>{{ title }}</title>
 </head>
@@ -18,7 +19,7 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <div class="logo"><img src="/static/apple-touch-icon.png" alt=""></div>
+      <div class="logo"><img src="/apple-touch-icon-v17.png" alt=""></div>
       <div><h1>{{ title }}</h1><p id="subtitle">Familienplan</p></div>
     </div>
     {% if auth_enabled %}<form id="logoutForm" method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>{% endif %}

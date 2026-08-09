@@ -88,21 +88,7 @@
     </div>
     <div class="year-toolbar">
       <select id="yearSelect" class="input fit"></select>
-      <select id="monthSelect" class="input fit" aria-label="Monat auswählen">
-        <option value="0">Alle Monate</option>
-        <option value="1">Januar</option>
-        <option value="2">Februar</option>
-        <option value="3">März</option>
-        <option value="4">April</option>
-        <option value="5">Mai</option>
-        <option value="6">Juni</option>
-        <option value="7">Juli</option>
-        <option value="8">August</option>
-        <option value="9">September</option>
-        <option value="10">Oktober</option>
-        <option value="11">November</option>
-        <option value="12">Dezember</option>
-      </select>
+      <button id="yearMonthSelect" class="secondary year-month-select" type="button">Monate: Alle</button>
       <button id="yearPdfButton" class="secondary server-export" type="button">PDF / Drucken</button>
       <a id="csvLink" class="secondary linkbtn server-export" href="#">CSV</a>
       <span class="spacer"></span>
@@ -258,6 +244,23 @@
     </div>
     <div id="exportPeopleGrid" class="export-person-grid"></div>
     <button id="exportPeopleApply" class="primary export-apply" type="button">Auswahl übernehmen</button>
+  </div>
+</div>
+
+<div id="yearMonthsModalBack" class="modalback export-modalback" onclick="if(event.target===this)closeYearMonthsModal()">
+  <div class="modal export-modal month-select-modal" role="dialog" aria-modal="true" aria-labelledby="yearMonthsTitle">
+    <div class="export-modal-head">
+      <div>
+        <h3 id="yearMonthsTitle">Monate auswählen</h3>
+        <p class="small">Die Auswahl gilt für Ansicht, CSV und PDF.</p>
+      </div>
+      <button class="close" onclick="closeYearMonthsModal()" aria-label="Schliessen">✕</button>
+    </div>
+    <div class="export-quick-actions export-quick-actions-single">
+      <button id="yearMonthsAll" class="secondary" type="button">Alle Monate auswählen</button>
+    </div>
+    <div id="yearMonthsGrid" class="year-month-grid"></div>
+    <button id="yearMonthsApply" class="primary export-apply" type="button">Auswahl übernehmen</button>
   </div>
 </div>
 

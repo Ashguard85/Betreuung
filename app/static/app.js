@@ -7,6 +7,8 @@ let selectedBatch = null;
 let batchPreviewKey = null;
 let exportPeople = [];
 let exportPeopleAllSelected = true;
+const YEAR_MONTH_NAMES = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+let yearMonths = Array.from({length:12},(_,i)=>i+1);
 let editingId = null;
 let reloadingForServiceWorker = false;
 
@@ -208,6 +210,44 @@ function applyExportPeopleSelection(){
   renderList();
   toast(exportPeopleAreAll()?"Alle Personen ausgewählt":chosen.length===1?chosen[0]:`${chosen.length} Personen ausgewählt`);
 }
+function yearMonthsAreAll(){
+  return yearMonths.length===12 && Array.from({length:12},(_,i)=>i+1).every(m=>yearMonths.includes(m));
+}
+function updateYearMonthButton(){
+  const button=qs("#yearMonthSelect");
+  if(!button) return;
+  if(yearMonthsAreAll()) button.textContent="Monate: Alle";
+  else if(yearMonths.length===1) button.textContent=`Monat: ${YEAR_MONTH_NAMES[yearMonths[0]-1]}`;
+  else button.textContent=`Monate: ${yearMonths.length}`;
+}
+function openYearMonthsModal(){
+  const grid=qs("#yearMonthsGrid");
+  grid.innerHTML=YEAR_MONTH_NAMES.map((name,i)=>`<label class="export-person-option month-option"><input type="checkbox" value="${i+1}" ${yearMonths.includes(i+1)?"checked":""}><span>${esc(name)}</span></label>`).join("");
+  qs("#yearMonthsModalBack").classList.add("open");
+  document.body.classList.add("modal-open");
+}
+function closeYearMonthsModal(){
+  qs("#yearMonthsModalBack").classList.remove("open");
+  if(!qs("#modalBack")?.classList.contains("open")&&!qs("#batchModalBack")?.classList.contains("open")&&!qs("#exportPeopleModalBack")?.classList.contains("open")) document.body.classList.remove("modal-open");
+}
+function setYearMonthChecks(mode){
+  const boxes=qsa('#yearMonthsGrid input[type="checkbox"]');
+  if(mode==="all") boxes.forEach(b=>b.checked=true);
+}
+function applyYearMonthSelection(){
+  const chosen=qsa('#yearMonthsGrid input[type="checkbox"]:checked').map(b=>Number(b.value)).sort((a,b)=>a-b);
+  if(!chosen.length) return toast("Mindestens einen Monat wählen");
+  yearMonths=chosen;
+  closeYearMonthsModal();
+  updateYearMonthButton();
+  renderYear();
+  toast(yearMonthsAreAll()?"Alle Monate ausgewählt":chosen.length===1?YEAR_MONTH_NAMES[chosen[0]-1]:`${chosen.length} Monate ausgewählt`);
+}
+function yearMonthQuery(){
+  const params=new URLSearchParams();
+  if(!yearMonthsAreAll()) yearMonths.forEach(m=>params.append("month",String(m)));
+  return params;
+}
 function renderList(){
   const year=qs("#filterYear").value;
   const search=qs("#filterSearch").value.toLowerCase().trim();
@@ -251,13 +291,11 @@ function periodMapForYear(year){
 }
 function renderYear(){
   const year=Number(qs("#yearSelect").value);
-  const selectedMonth=Number(qs("#monthSelect")?.value||0);
-  const months=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
-  const visibleMonths=selectedMonth ? [selectedMonth-1] : months.map((_,i)=>i);
+  const visibleMonths=yearMonths.map(m=>m-1);
   const byDay=new Map(entries.filter(e=>e.day.startsWith(String(year))).map(e=>[e.day,e]));
   const marks=periodMapForYear(year);
-  const tableClass=selectedMonth?"year month-view":"year";
-  let out=`<table class="${tableClass}"><colgroup><col class="day-col">${visibleMonths.map(()=>'<col class="month-col">').join("")}<col class="day-col"></colgroup><thead><tr><th>Tag</th>${visibleMonths.map(i=>`<th>${months[i]}</th>`).join("")}<th>Tag</th></tr></thead><tbody>`;
+  const tableClass=visibleMonths.length===1?"year month-view":"year";
+  let out=`<table class="${tableClass}"><colgroup><col class="day-col">${visibleMonths.map(()=>'<col class="month-col">').join("")}<col class="day-col"></colgroup><thead><tr><th>Tag</th>${visibleMonths.map(i=>`<th>${YEAR_MONTH_NAMES[i]}</th>`).join("")}<th>Tag</th></tr></thead><tbody>`;
   for(let day=1;day<=31;day++){
     out+=`<tr><td>${day}</td>`;
     for(const month of visibleMonths){
@@ -287,7 +325,10 @@ function renderYear(){
     periodLegend.push(`<span class="period-legend"><i class="bar-swatch" style="background:${esc(p.color)}"></i>${periodKindName(p.kind)}</span>`);
   }
   qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span>`+periodLegend.join("");
-  qs("#csvLink").href=`/export.csv?year=${year}${selectedMonth?`&month=${selectedMonth}`:""}`;
+  const monthParams=yearMonthQuery();
+  const monthQuery=monthParams.toString();
+  qs("#csvLink").href=`/export.csv?year=${year}${monthQuery?`&${monthQuery}`:""}`;
+  updateYearMonthButton();
 }
 
 async function renderStatsByPerson(){
@@ -618,9 +659,10 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   });
   qs("#yearPdfButton").addEventListener("click",()=>{
     const year=qs("#yearSelect").value;
-    const month=Number(qs("#monthSelect")?.value||0);
-    const suffix=month?`-${String(month).padStart(2,"0")}`:"";
-    const url=`/export-year.pdf?year=${encodeURIComponent(year)}${month?`&month=${month}`:""}`;
+    const params=yearMonthQuery();
+    const query=params.toString();
+    const suffix=yearMonthsAreAll()?"":yearMonths.length===1?`-${String(yearMonths[0]).padStart(2,"0")}`:`-${yearMonths.length}-monate`;
+    const url=`/export-year.pdf?year=${encodeURIComponent(year)}${query?`&${query}`:""}`;
     shareServerPdf(url,`jahresplan-${year}${suffix}.pdf`);
   });
   qs("#exportPeopleAll").addEventListener("click",()=>setExportPeopleChecks("all"));
@@ -646,7 +688,9 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#filterYear").addEventListener("change",renderList);
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});
-  qs("#monthSelect").addEventListener("change",renderYear);
+  qs("#yearMonthSelect").addEventListener("click",openYearMonthsModal);
+  qs("#yearMonthsAll").addEventListener("click",()=>setYearMonthChecks("all"));
+  qs("#yearMonthsApply").addEventListener("click",applyYearMonthSelection);
   qs("#addPerson").addEventListener("click",async()=>{
     const name=qs("#newPerson").value.trim();if(!name)return;
     try{

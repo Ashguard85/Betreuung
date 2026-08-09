@@ -940,11 +940,12 @@ def export_csv():
     year = request.args.get("year", "").strip()
     people = [p.strip() for p in request.args.getlist("person") if p.strip()]
     search = request.args.get("q", "").strip()
-    month = request.args.get("month", "").strip()
+    raw_months = request.args.getlist("month")
+    months = sorted({int(m) for m in raw_months if m.isdigit() and 1 <= int(m) <= 12})
     rows = filtered_entry_rows(year, people, search)
-    if month.isdigit() and 1 <= int(month) <= 12 and year:
-        prefix = f"{year}-{int(month):02d}-"
-        rows = [r for r in rows if r["day"].startswith(prefix)]
+    if months and year:
+        prefixes = tuple(f"{year}-{m:02d}-" for m in months)
+        rows = [r for r in rows if r["day"].startswith(prefixes)]
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
@@ -1105,56 +1106,48 @@ def export_year_pdf():
     if year < 1900 or year > 2200:
         year = date.today().year
 
-    raw_month = request.args.get("month", "").strip()
-    try:
-        selected_month = int(raw_month) if raw_month else None
-    except ValueError:
-        selected_month = None
-    if selected_month not in range(1, 13):
-        selected_month = None
+    raw_months = request.args.getlist("month")
+    selected_months = sorted({int(m) for m in raw_months if m.isdigit() and 1 <= int(m) <= 12})
 
     month_names = ["Januar", "Februar", "März", "April", "Mai", "Juni",
                    "Juli", "August", "September", "Oktober", "November", "Dezember"]
-    month_indices = [selected_month] if selected_month else list(range(1, 13))
+    month_indices = selected_months if selected_months else list(range(1, 13))
+    single_month = len(month_indices) == 1
 
     year_entries = entry_rows("e.day LIKE ?", (f"{year}-%",))
-    if selected_month:
-        prefix = f"{year}-{selected_month:02d}-"
-        display_entries = [row for row in year_entries if row["day"].startswith(prefix)]
+    if selected_months:
+        prefixes = tuple(f"{year}-{m:02d}-" for m in month_indices)
+        display_entries = [row for row in year_entries if row["day"].startswith(prefixes)]
     else:
         display_entries = year_entries
     by_day = {row["day"]: row for row in display_entries}
 
     year_periods = period_rows(str(year))
-    if selected_month:
-        range_start = date(year, selected_month, 1)
-        if selected_month == 12:
-            range_end = date(year, 12, 31)
-        else:
-            range_end = date(year, selected_month + 1, 1) - timedelta(days=1)
-    else:
-        range_start = date(year, 1, 1)
-        range_end = date(year, 12, 31)
+    selected_month_set = set(month_indices)
 
     display_periods = []
     periods_by_day = {}
     for period in year_periods:
         period_start = date.fromisoformat(period["start_day"])
         period_end = date.fromisoformat(period["end_day"])
-        if period_end < range_start or period_start > range_end:
+        if period_end < date(year, 1, 1) or period_start > date(year, 12, 31):
             continue
-        display_periods.append(period)
-        start_obj = max(period_start, range_start)
-        end_obj = min(period_end, range_end)
+        period_used = False
+        start_obj = max(period_start, date(year, 1, 1))
+        end_obj = min(period_end, date(year, 12, 31))
         current = start_obj
         while current <= end_obj:
-            periods_by_day.setdefault(current.isoformat(), []).append(period)
+            if current.month in selected_month_set:
+                periods_by_day.setdefault(current.isoformat(), []).append(period)
+                period_used = True
             current += timedelta(days=1)
+        if period_used:
+            display_periods.append(period)
 
     output = io.BytesIO()
-    page_size = A4 if selected_month else landscape(A4)
-    margin = 10 * mm if selected_month else 8 * mm
-    plan_title = f"Monatsplan {month_names[selected_month - 1]} {year}" if selected_month else f"Jahresplan {year}"
+    page_size = A4 if single_month else landscape(A4)
+    margin = 10 * mm if single_month else 8 * mm
+    plan_title = (f"Monatsplan {month_names[month_indices[0] - 1]} {year}" if single_month else (f"Jahresplan {year}" if len(month_indices)==12 else f"Monatsauswahl {year} · {len(month_indices)} Monate"))
     doc = SimpleDocTemplate(
         output,
         pagesize=page_size,
@@ -1171,26 +1164,26 @@ def export_year_pdf():
         "YearTitle",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=10 if selected_month else 9.2,
-        leading=11 if selected_month else 10.2,
+        fontSize=10 if single_month else 9.2,
+        leading=11 if single_month else 10.2,
         textColor=colors.HexColor("#1e2524"),
-        spaceAfter=1.2 * mm if selected_month else 0.8 * mm,
+        spaceAfter=1.2 * mm if single_month else 0.8 * mm,
     )
     head_style = ParagraphStyle(
         "YearHead",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=6.4 if selected_month else 5.0,
-        leading=6.8 if selected_month else 5.4,
+        fontSize=6.4 if single_month else 5.0,
+        leading=6.8 if single_month else 5.4,
         alignment=1,
         textColor=colors.HexColor("#1e2524"),
     )
 
     usable_w = page_size[0] - doc.leftMargin - doc.rightMargin
-    day_col_w = 10 * mm if selected_month else 6.2 * mm
+    day_col_w = 10 * mm if single_month else 6.2 * mm
     month_w = (usable_w - 2 * day_col_w) / len(month_indices)
-    header_h = 6 * mm if selected_month else 4.5 * mm
-    day_h = 5.8 * mm if selected_month else 4.1 * mm
+    header_h = 6 * mm if single_month else 4.5 * mm
+    day_h = 5.8 * mm if single_month else 4.1 * mm
 
     data = [[Paragraph("Tag", head_style)] +
             [Paragraph(month_names[m - 1], head_style) for m in month_indices] +
@@ -1209,8 +1202,8 @@ def export_year_pdf():
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
         ("FONTNAME", (last_col, 1), (last_col, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 1), (0, -1), 6 if selected_month else 5.1),
-        ("FONTSIZE", (last_col, 1), (last_col, -1), 6 if selected_month else 5.1),
+        ("FONTSIZE", (0, 1), (0, -1), 6 if single_month else 5.1),
+        ("FONTSIZE", (last_col, 1), (last_col, -1), 6 if single_month else 5.1),
     ]
 
     for day_num in range(1, 32):
@@ -1263,7 +1256,7 @@ def export_year_pdf():
             legend_items.append(key)
 
     legend_rows = []
-    per_row = 3 if selected_month else 7
+    per_row = 3 if single_month else 7
     for i in range(0, len(legend_items), per_row):
         chunk = legend_items[i:i + per_row]
         row = [_legend_item(label, color_value, width=(usable_w / per_row) - 1 * mm) for label, color_value in chunk]
@@ -1294,7 +1287,7 @@ def export_year_pdf():
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     pdf_bytes = output.getvalue()
     output.close()
-    filename = f"monatsplan-{year}-{selected_month:02d}.pdf" if selected_month else year_export_filename(year)
+    filename = (f"monatsplan-{year}-{month_indices[0]:02d}.pdf" if single_month else (year_export_filename(year) if len(month_indices)==12 else f"jahresplan-{year}-{len(month_indices)}-monate.pdf"))
     return Response(
         pdf_bytes,
         mimetype="application/pdf",

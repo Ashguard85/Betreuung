@@ -73,45 +73,88 @@ body.modal-open{overflow:hidden}
 }
 
 
-/* Compact native date fields — especially for iPhone/Safari. */
-input[type="date"].input{
-  width:min(100%,176px);
-  max-width:176px;
-  height:38px;
-  min-height:38px;
-  padding:5px 8px;
-  border-radius:10px;
-  font-size:16px;
-  line-height:20px;
-  color-scheme:light;
-}
-input[type="date"].input::-webkit-date-and-time-value{
-  min-height:0;
-  margin:0;
-  padding:0;
-  text-align:left;
-}
-input[type="date"].input::-webkit-datetime-edit{
-  padding:0;
-}
-input[type="date"].input::-webkit-calendar-picker-indicator{
-  margin:0;
-  padding:2px;
-}
-.batch-modal input[type="date"].input{
+/* Date controls: custom visual shell, native iOS picker remains as invisible tap target. */
+.date-shell{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   width:100%;
-  max-width:100%;
-  height:38px;
-  min-height:38px;
-  padding:5px 7px;
-  border-radius:10px;
+  max-width:190px;
+  height:44px;
+  min-height:44px;
+  min-width:0;
+  overflow:hidden;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:12px;
+  box-sizing:border-box;
+}
+.date-shell:focus-within{
+  border-color:#9ab7af;
+  box-shadow:0 0 0 3px #eaf3f0;
+}
+.date-shell .date-display{
+  display:block;
+  width:100%;
+  min-width:0;
+  padding:0 10px;
+  text-align:center;
+  font-size:16px;
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+  color:var(--text);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  pointer-events:none;
+}
+.date-shell .date-native{
+  position:absolute!important;
+  inset:0!important;
+  z-index:2;
+  display:block!important;
+  width:100%!important;
+  max-width:none!important;
+  min-width:0!important;
+  height:100%!important;
+  min-height:0!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  opacity:.001;
+  background:transparent!important;
+  box-shadow:none!important;
+  -webkit-appearance:none;
+  appearance:none;
+  color:transparent!important;
+  font-size:16px!important;
+  line-height:1!important;
+}
+.date-shell .date-native::-webkit-date-and-time-value,
+.date-shell .date-native::-webkit-datetime-edit,
+.date-shell .date-native::-webkit-calendar-picker-indicator{
+  opacity:0;
+}
+.batch-modal .date-shell,
+.period-form-grid .date-shell{
+  max-width:none;
+}
+.batch-modal .date-shell{
+  height:42px;
+  min-height:42px;
+}
+.batch-form-grid .batch-field{
+  overflow:hidden;
+}
+.batch-form-grid .batch-field:nth-child(3),
+.batch-form-grid .batch-field:nth-child(4){
+  min-width:0;
 }
 @media(max-width:430px){
-  input[type="date"].input{
-    height:38px;
-    min-height:38px;
-    padding:4px 7px;
-    border-radius:10px;
-  }
-  #quickDate,#modalDate{max-width:168px}
+  .date-shell{height:42px;min-height:42px;max-width:176px}
+  .batch-modal .date-shell{height:40px;min-height:40px;max-width:none}
+  .batch-form-grid{column-gap:12px}
+  .date-shell .date-display{font-size:15px;padding:0 7px}
 }

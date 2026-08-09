@@ -34,6 +34,33 @@ async function api(url, options={}) {
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
 function isoToday(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function formatDateValue(value){
+  if(!value) return "Datum wählen";
+  const m=String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : value;
+}
+function syncDateShell(input){
+  const shell=input?.closest?.(".date-shell");
+  const display=shell?.querySelector(".date-display");
+  if(display) display.textContent=formatDateValue(input.value);
+}
+function syncAllDateShells(){ qsa('.date-shell input[type="date"]').forEach(syncDateShell); }
+function upgradeDateInputs(){
+  qsa('input[type="date"].input').forEach(input=>{
+    if(input.closest(".date-shell")){ syncDateShell(input); return; }
+    const shell=document.createElement("div");
+    shell.className="date-shell";
+    input.parentNode.insertBefore(shell,input);
+    shell.appendChild(input);
+    input.classList.add("date-native");
+    const display=document.createElement("span");
+    display.className="date-display";
+    shell.appendChild(display);
+    input.addEventListener("input",()=>syncDateShell(input));
+    input.addEventListener("change",()=>syncDateShell(input));
+    syncDateShell(input);
+  });
+}
 function monthShort(d){ return d.toLocaleDateString("de-CH",{month:"short"}).replace(".",""); }
 function weekdayShort(d){ return d.toLocaleDateString("de-CH",{weekday:"short"}).replace(".",""); }
 function personById(id){ return people.find(p=>Number(p.id)===Number(id)); }
@@ -227,6 +254,7 @@ function openModal(id=null){
   const e=id?entries.find(x=>Number(x.id)===Number(id)):null;
   qs("#modalTitle").textContent=e?"Eintrag bearbeiten":"Betreuung eintragen";
   qs("#modalDate").value=e?e.day:(qs("#quickDate").value||isoToday());
+  syncDateShell(qs("#modalDate"));
   qs("#modalNote").value=e?e.note:"";
   selectedModal=e?e.person_id:(people[0]?.id||null);
   renderPersonButtons("#modalPeople","modal");
@@ -234,7 +262,7 @@ function openModal(id=null){
   qs("#modalBack").classList.add("open");
 }
 function closeModal(){qs("#modalBack").classList.remove("open");editingId=null;}
-function prefillDate(day){openModal();qs("#modalDate").value=day;}
+function prefillDate(day){openModal();qs("#modalDate").value=day;syncDateShell(qs("#modalDate"));}
 
 function formatIsoDate(day){
   if(!day) return "";
@@ -264,6 +292,8 @@ function openBatchModal(){
   const now=new Date();
   qs("#batchStart").value=isoToday();
   qs("#batchEnd").value=`${now.getFullYear()}-12-31`;
+  syncDateShell(qs("#batchStart"));
+  syncDateShell(qs("#batchEnd"));
   qs("#batchWeekday").value=String((now.getDay()+6)%7);
   qs("#batchNote").value="";
   resetBatchPreview();
@@ -434,7 +464,9 @@ document.addEventListener("click",e=>{
 document.addEventListener("DOMContentLoaded", async ()=>{
   yearOptions(qs("#yearSelect"));
   yearOptions(qs("#filterYear"));
+  upgradeDateInputs();
   qs("#quickDate").value=isoToday();
+  syncDateShell(qs("#quickDate"));
 
   qs("#quickSave").addEventListener("click",async()=>{
     try{
@@ -479,6 +511,8 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   });
   qs("#periodStart").value=isoToday();
   qs("#periodEnd").value=isoToday();
+  syncDateShell(qs("#periodStart"));
+  syncDateShell(qs("#periodEnd"));
   qs("#addPeriod").addEventListener("click",addPeriod);
   qs("#periodKind").addEventListener("change",()=>{
     qs("#periodColor").value=qs("#periodKind").value==="holiday"?"#d65a6f":qs("#periodKind").value==="vacation"?"#f2a65a":"#80a4c2";

@@ -940,7 +940,11 @@ def export_csv():
     year = request.args.get("year", "").strip()
     people = [p.strip() for p in request.args.getlist("person") if p.strip()]
     search = request.args.get("q", "").strip()
+    month = request.args.get("month", "").strip()
     rows = filtered_entry_rows(year, people, search)
+    if month.isdigit() and 1 <= int(month) <= 12 and year:
+        prefix = f"{year}-{int(month):02d}-"
+        rows = [r for r in rows if r["day"].startswith(prefix)]
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
@@ -1101,31 +1105,64 @@ def export_year_pdf():
     if year < 1900 or year > 2200:
         year = date.today().year
 
-    year_entries = entry_rows("e.day LIKE ?", (f"{year}-%",))
-    by_day = {row["day"]: row for row in year_entries}
-    year_periods = period_rows(str(year))
+    raw_month = request.args.get("month", "").strip()
+    try:
+        selected_month = int(raw_month) if raw_month else None
+    except ValueError:
+        selected_month = None
+    if selected_month not in range(1, 13):
+        selected_month = None
 
+    month_names = ["Januar", "Februar", "März", "April", "Mai", "Juni",
+                   "Juli", "August", "September", "Oktober", "November", "Dezember"]
+    month_indices = [selected_month] if selected_month else list(range(1, 13))
+
+    year_entries = entry_rows("e.day LIKE ?", (f"{year}-%",))
+    if selected_month:
+        prefix = f"{year}-{selected_month:02d}-"
+        display_entries = [row for row in year_entries if row["day"].startswith(prefix)]
+    else:
+        display_entries = year_entries
+    by_day = {row["day"]: row for row in display_entries}
+
+    year_periods = period_rows(str(year))
+    if selected_month:
+        range_start = date(year, selected_month, 1)
+        if selected_month == 12:
+            range_end = date(year, 12, 31)
+        else:
+            range_end = date(year, selected_month + 1, 1) - timedelta(days=1)
+    else:
+        range_start = date(year, 1, 1)
+        range_end = date(year, 12, 31)
+
+    display_periods = []
     periods_by_day = {}
-    year_start = date(year, 1, 1)
-    year_end = date(year, 12, 31)
     for period in year_periods:
-        start_obj = max(date.fromisoformat(period["start_day"]), year_start)
-        end_obj = min(date.fromisoformat(period["end_day"]), year_end)
+        period_start = date.fromisoformat(period["start_day"])
+        period_end = date.fromisoformat(period["end_day"])
+        if period_end < range_start or period_start > range_end:
+            continue
+        display_periods.append(period)
+        start_obj = max(period_start, range_start)
+        end_obj = min(period_end, range_end)
         current = start_obj
         while current <= end_obj:
             periods_by_day.setdefault(current.isoformat(), []).append(period)
             current += timedelta(days=1)
 
     output = io.BytesIO()
-    page_size = landscape(A4)
+    page_size = A4 if selected_month else landscape(A4)
+    margin = 10 * mm if selected_month else 8 * mm
+    plan_title = f"Monatsplan {month_names[selected_month - 1]} {year}" if selected_month else f"Jahresplan {year}"
     doc = SimpleDocTemplate(
         output,
         pagesize=page_size,
-        leftMargin=8 * mm,
-        rightMargin=8 * mm,
+        leftMargin=margin,
+        rightMargin=margin,
         topMargin=7 * mm,
         bottomMargin=7 * mm,
-        title=f"Jahresplan {year}",
+        title=plan_title,
         author=APP_TITLE,
     )
 
@@ -1134,34 +1171,36 @@ def export_year_pdf():
         "YearTitle",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=9.2,
-        leading=10.2,
+        fontSize=10 if selected_month else 9.2,
+        leading=11 if selected_month else 10.2,
         textColor=colors.HexColor("#1e2524"),
-        spaceAfter=0.8 * mm,
+        spaceAfter=1.2 * mm if selected_month else 0.8 * mm,
     )
     head_style = ParagraphStyle(
         "YearHead",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=5.1,
-        leading=5.5,
+        fontSize=6.4 if selected_month else 5.0,
+        leading=6.8 if selected_month else 5.4,
         alignment=1,
         textColor=colors.HexColor("#1e2524"),
     )
 
-    months = ["Januar", "Februar", "März", "April", "Mai", "Juni",
-              "Juli", "August", "September", "Oktober", "November", "Dezember"]
     usable_w = page_size[0] - doc.leftMargin - doc.rightMargin
-    day_col_w = 7.2 * mm
-    month_w = (usable_w - day_col_w) / 12
-    header_h = 4.5 * mm
-    day_h = 4.1 * mm
+    day_col_w = 10 * mm if selected_month else 6.2 * mm
+    month_w = (usable_w - 2 * day_col_w) / len(month_indices)
+    header_h = 6 * mm if selected_month else 4.5 * mm
+    day_h = 5.8 * mm if selected_month else 4.1 * mm
 
-    data = [[Paragraph("Tag", head_style)] + [Paragraph(m, head_style) for m in months]]
+    data = [[Paragraph("Tag", head_style)] +
+            [Paragraph(month_names[m - 1], head_style) for m in month_indices] +
+            [Paragraph("Tag", head_style)]]
+    last_col = len(month_indices) + 1
     style_cmds = [
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dfe4e1")),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f5f7f6")),
         ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#fafbfa")),
+        ("BACKGROUND", (last_col, 1), (last_col, -1), colors.HexColor("#fafbfa")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -1169,13 +1208,15 @@ def export_year_pdf():
         ("TOPPADDING", (0, 0), (-1, -1), 0),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 1), (0, -1), 5.1),
+        ("FONTNAME", (last_col, 1), (last_col, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 1), (0, -1), 6 if selected_month else 5.1),
+        ("FONTSIZE", (last_col, 1), (last_col, -1), 6 if selected_month else 5.1),
     ]
 
     for day_num in range(1, 32):
         row = [str(day_num)]
         pdf_row = day_num
-        for month_idx in range(1, 13):
+        for col_pos, month_idx in enumerate(month_indices, start=1):
             try:
                 d = date(year, month_idx, day_num)
                 valid = True
@@ -1184,18 +1225,19 @@ def export_year_pdf():
 
             if not valid:
                 row.append("")
-                style_cmds.append(("BACKGROUND", (month_idx, pdf_row), (month_idx, pdf_row), colors.HexColor("#f1f2f1")))
+                style_cmds.append(("BACKGROUND", (col_pos, pdf_row), (col_pos, pdf_row), colors.HexColor("#f1f2f1")))
                 continue
 
             iso = d.isoformat()
             if d.weekday() >= 5:
-                style_cmds.append(("BACKGROUND", (month_idx, pdf_row), (month_idx, pdf_row), colors.HexColor("#fff2b9")))
+                style_cmds.append(("BACKGROUND", (col_pos, pdf_row), (col_pos, pdf_row), colors.HexColor("#fff2b9")))
             row.append(YearOverviewCell(month_w, day_h, by_day.get(iso), periods_by_day.get(iso, [])))
+        row.append(str(day_num))
         data.append(row)
 
     year_table = Table(
         data,
-        colWidths=[day_col_w] + [month_w] * 12,
+        colWidths=[day_col_w] + [month_w] * len(month_indices) + [day_col_w],
         rowHeights=[header_h] + [day_h] * 31,
         hAlign="LEFT",
     )
@@ -1204,7 +1246,7 @@ def export_year_pdf():
     legend_items = []
     used_people = []
     seen_people = set()
-    for entry in year_entries:
+    for entry in display_entries:
         key = (entry["person"], entry["color"])
         if key not in seen_people:
             seen_people.add(key)
@@ -1214,14 +1256,14 @@ def export_year_pdf():
 
     kind_names = {"vacation": "Ferien", "holiday": "Feiertage", "other": "Markierung"}
     seen_period_legend = set()
-    for period in year_periods:
+    for period in display_periods:
         key = (kind_names.get(period.get("kind"), period.get("label") or "Markierung"), period.get("color") or "#80a4c2")
         if key not in seen_period_legend:
             seen_period_legend.add(key)
             legend_items.append(key)
 
     legend_rows = []
-    per_row = 7
+    per_row = 3 if selected_month else 7
     for i in range(0, len(legend_items), per_row):
         chunk = legend_items[i:i + per_row]
         row = [_legend_item(label, color_value, width=(usable_w / per_row) - 1 * mm) for label, color_value in chunk]
@@ -1237,7 +1279,7 @@ def export_year_pdf():
             ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5),
         ]))
 
-    story = [Paragraph(f"Jahresplan {year}", title_style), year_table, Spacer(1, 0.8 * mm)]
+    story = [Paragraph(plan_title, title_style), year_table, Spacer(1, 0.8 * mm)]
     if legend:
         story.append(legend)
 
@@ -1245,14 +1287,14 @@ def export_year_pdf():
         canvas.saveState()
         canvas.setFont("Helvetica", 6)
         canvas.setFillColor(colors.HexColor("#68716f"))
-        canvas.drawString(8 * mm, 3.2 * mm, APP_TITLE)
-        canvas.drawRightString(page_size[0] - 8 * mm, 3.2 * mm, f"Jahresplan {year}")
+        canvas.drawString(margin, 3.2 * mm, APP_TITLE)
+        canvas.drawRightString(page_size[0] - margin, 3.2 * mm, plan_title)
         canvas.restoreState()
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     pdf_bytes = output.getvalue()
     output.close()
-    filename = year_export_filename(year)
+    filename = f"monatsplan-{year}-{selected_month:02d}.pdf" if selected_month else year_export_filename(year)
     return Response(
         pdf_bytes,
         mimetype="application/pdf",
@@ -1262,7 +1304,6 @@ def export_year_pdf():
             "Cache-Control": "no-store",
         },
     )
-
 
 @app.post("/import.csv")
 @login_required

@@ -251,13 +251,16 @@ function periodMapForYear(year){
 }
 function renderYear(){
   const year=Number(qs("#yearSelect").value);
+  const selectedMonth=Number(qs("#monthSelect")?.value||0);
   const months=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+  const visibleMonths=selectedMonth ? [selectedMonth-1] : months.map((_,i)=>i);
   const byDay=new Map(entries.filter(e=>e.day.startsWith(String(year))).map(e=>[e.day,e]));
   const marks=periodMapForYear(year);
-  let out='<table class="year"><colgroup><col class="day-col">'+months.map(()=>'<col class="month-col">').join("")+'</colgroup><thead><tr><th>Tag</th>'+months.map(m=>`<th>${m}</th>`).join("")+'</tr></thead><tbody>';
+  const tableClass=selectedMonth?"year month-view":"year";
+  let out=`<table class="${tableClass}"><colgroup><col class="day-col">${visibleMonths.map(()=>'<col class="month-col">').join("")}<col class="day-col"></colgroup><thead><tr><th>Tag</th>${visibleMonths.map(i=>`<th>${months[i]}</th>`).join("")}<th>Tag</th></tr></thead><tbody>`;
   for(let day=1;day<=31;day++){
     out+=`<tr><td>${day}</td>`;
-    for(let month=0;month<12;month++){
+    for(const month of visibleMonths){
       const d=new Date(year,month,day,12);
       const valid=d.getFullYear()===year&&d.getMonth()===month&&d.getDate()===day;
       if(!valid){out+='<td class="invalid"></td>';continue;}
@@ -271,7 +274,7 @@ function renderYear(){
       const cellClass=[weekend?"weekend":"",dayMarks.length?"has-period":""].filter(Boolean).join(" ");
       out+=`<td class="${cellClass}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}"><div class="year-cell-content">${fill}${rail}</div></td>`;
     }
-    out+='</tr>';
+    out+=`<td class="day-repeat">${day}</td></tr>`;
   }
   out+='</tbody></table>';
   qs("#yearTableWrap").innerHTML=out;
@@ -284,7 +287,7 @@ function renderYear(){
     periodLegend.push(`<span class="period-legend"><i class="bar-swatch" style="background:${esc(p.color)}"></i>${periodKindName(p.kind)}</span>`);
   }
   qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span>`+periodLegend.join("");
-  qs("#csvLink").href=`/export.csv?year=${year}`;
+  qs("#csvLink").href=`/export.csv?year=${year}${selectedMonth?`&month=${selectedMonth}`:""}`;
 }
 
 async function renderStatsByPerson(){
@@ -615,7 +618,10 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   });
   qs("#yearPdfButton").addEventListener("click",()=>{
     const year=qs("#yearSelect").value;
-    shareServerPdf(`/export-year.pdf?year=${encodeURIComponent(year)}`,`jahresplan-${year}.pdf`);
+    const month=Number(qs("#monthSelect")?.value||0);
+    const suffix=month?`-${String(month).padStart(2,"0")}`:"";
+    const url=`/export-year.pdf?year=${encodeURIComponent(year)}${month?`&month=${month}`:""}`;
+    shareServerPdf(url,`jahresplan-${year}${suffix}.pdf`);
   });
   qs("#exportPeopleAll").addEventListener("click",()=>setExportPeopleChecks("all"));
   qs("#exportPeopleApply").addEventListener("click",applyExportPeopleSelection);
@@ -640,6 +646,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#filterYear").addEventListener("change",renderList);
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});
+  qs("#monthSelect").addEventListener("change",renderYear);
   qs("#addPerson").addEventListener("click",async()=>{
     const name=qs("#newPerson").value.trim();if(!name)return;
     try{

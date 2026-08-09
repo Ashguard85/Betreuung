@@ -46,7 +46,7 @@ async function loadPeople(){
   if (!selectedBatch && people.length) selectedBatch = people[0].id;
   renderPersonButtons("#quickPeople","quick");
   renderPersonButtons("#modalPeople","modal");
-  renderPersonButtons("#batchPeople","batch");
+  renderBatchPersonSelect();
   renderPersonFilter();
   renderPeopleSettings();
 }
@@ -69,13 +69,21 @@ function renderPersonButtons(target, mode){
       style="background:${esc(p.color)}" onclick="selectPerson('${mode}',${p.id})">${esc(p.name)}</button>
   `).join("");
 }
+function renderBatchPersonSelect(){
+  const select=qs("#batchPerson");
+  if(!select) return;
+  const selected=Number(selectedBatch || people[0]?.id || 0);
+  select.innerHTML=people.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  if(selected) select.value=String(selected);
+  if(select.value) selectedBatch=Number(select.value);
+}
 function selectPerson(mode,id){
   if(mode==="quick") {
     selectedQuick=id;
     renderPersonButtons("#quickPeople",mode);
   } else if(mode==="batch") {
     selectedBatch=id;
-    renderPersonButtons("#batchPeople",mode);
+    renderBatchPersonSelect();
     resetBatchPreview();
   } else {
     selectedModal=id;
@@ -252,7 +260,7 @@ function batchPayload(){
 function openBatchModal(){
   if(!navigator.onLine) return toast("Batch-Erstellung benötigt eine Serververbindung");
   selectedBatch=selectedQuick || people[0]?.id || null;
-  renderPersonButtons("#batchPeople","batch");
+  renderBatchPersonSelect();
   const now=new Date();
   qs("#batchStart").value=isoToday();
   qs("#batchEnd").value=`${now.getFullYear()}-12-31`;
@@ -260,10 +268,12 @@ function openBatchModal(){
   qs("#batchNote").value="";
   resetBatchPreview();
   qs("#batchModalBack").classList.add("open");
+  document.body.classList.add("modal-open");
   applyOnlineState();
 }
 function closeBatchModal(){
   qs("#batchModalBack").classList.remove("open");
+  if(!qs("#modalBack")?.classList.contains("open")) document.body.classList.remove("modal-open");
   resetBatchPreview();
 }
 async function previewBatch(){
@@ -273,13 +283,9 @@ async function previewBatch(){
   try{
     const data=await api("/api/entries/batch/preview",{method:"POST",body:JSON.stringify(payload)});
     const weekday=qs("#batchWeekday").selectedOptions[0]?.textContent || "Wochentag";
-    let details="";
-    if(data.occupied?.length){
-      const shown=data.occupied.slice(0,6).map(x=>`${formatIsoDate(x.day)} (${esc(x.person)})`).join(" · ");
-      const more=data.occupied.length>6?` · +${data.occupied.length-6} weitere`:"";
-      details=`<div class="small topgap">Bereits belegt: ${shown}${more}</div>`;
-    }
-    qs("#batchPreviewBox").innerHTML=`<b>${data.matched_count} ${esc(weekday)} gefunden</b><div>${data.create_count} neu · ${data.skipped_count} bereits belegt und werden übersprungen</div>${details}`;
+    const occupiedText=(data.occupied||[]).map(x=>`${formatIsoDate(x.day)} (${x.person})`).join(" · ");
+    qs("#batchPreviewBox").title=occupiedText ? `Bereits belegt: ${occupiedText}` : "";
+    qs("#batchPreviewBox").innerHTML=`<b>${data.matched_count} ${esc(weekday)}</b><span>${data.create_count} neu · ${data.skipped_count} belegt</span>`;
     qs("#batchPreviewBox").hidden=false;
     batchPreviewKey=JSON.stringify(payload);
     qs("#batchCreate").disabled=data.create_count===0;
@@ -440,6 +446,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#openBatch").addEventListener("click",openBatchModal);
   qs("#batchPreview").addEventListener("click",previewBatch);
   qs("#batchCreate").addEventListener("click",createBatch);
+  qs("#batchPerson").addEventListener("change",()=>{selectedBatch=Number(qs("#batchPerson").value);resetBatchPreview();});
   ["#batchWeekday","#batchStart","#batchEnd","#batchNote"].forEach(sel=>{
     qs(sel).addEventListener(sel==="#batchNote"?"input":"change",resetBatchPreview);
   });

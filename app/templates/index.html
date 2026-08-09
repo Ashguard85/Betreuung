@@ -219,17 +219,24 @@
   </div>
 </div>
 
-<div id="batchModalBack" class="modalback" onclick="if(event.target===this)closeBatchModal()">
-  <div class="modal">
-    <div class="row"><h3>Mehrere Einträge erstellen</h3><span class="spacer"></span><button class="close" onclick="closeBatchModal()">✕</button></div>
-    <p class="small">Erzeugt einmalig normale Einzeltermine. Danach gibt es keine Serie mehr – jeder Eintrag kann separat geändert oder gelöscht werden.</p>
-
-    <label class="label topgap">Betreuung</label>
-    <div class="person-grid" id="batchPeople"></div>
-
-    <div class="batch-grid topgap">
+<div id="batchModalBack" class="modalback batch-modalback" onclick="if(event.target===this)closeBatchModal()">
+  <div class="modal batch-modal" role="dialog" aria-modal="true" aria-labelledby="batchModalTitle">
+    <div class="batch-head">
       <div>
-        <label class="label">Wochentag</label>
+        <h3 id="batchModalTitle">Mehrere Einträge</h3>
+        <p class="batch-hint">Einmalig erzeugen – danach sind es normale Einzeltermine.</p>
+      </div>
+      <button class="close" onclick="closeBatchModal()" aria-label="Schliessen">✕</button>
+    </div>
+
+    <div class="batch-form-grid">
+      <div class="batch-field">
+        <label class="label" for="batchPerson">Betreuung</label>
+        <select id="batchPerson" class="input"></select>
+      </div>
+
+      <div class="batch-field">
+        <label class="label" for="batchWeekday">Wochentag</label>
         <select id="batchWeekday" class="input">
           <option value="0">Montag</option>
           <option value="1">Dienstag</option>
@@ -240,22 +247,29 @@
           <option value="6">Sonntag</option>
         </select>
       </div>
-      <div>
-        <label class="label">Von</label>
+
+      <div class="batch-field">
+        <label class="label" for="batchStart">Von</label>
         <input id="batchStart" class="input" type="date">
       </div>
-      <div>
-        <label class="label">Bis</label>
+
+      <div class="batch-field">
+        <label class="label" for="batchEnd">Bis</label>
         <input id="batchEnd" class="input" type="date">
+      </div>
+
+      <div class="batch-field batch-field-wide">
+        <label class="label" for="batchNote">Bemerkung <span class="small">(optional)</span></label>
+        <input id="batchNote" class="input" placeholder="z. B. reguläre Kita">
       </div>
     </div>
 
-    <label class="label topgap">Bemerkung <span class="small">(optional, für alle erzeugten Einträge)</span></label>
-    <input id="batchNote" class="input" placeholder="z. B. reguläre Kita">
+    <div id="batchPreviewBox" class="batch-preview" hidden></div>
 
-    <button class="secondary full topgap" id="batchPreview">Vorschau berechnen</button>
-    <div id="batchPreviewBox" class="batch-preview topgap" hidden></div>
-    <button class="primary topgap" id="batchCreate" disabled>Einträge erstellen</button>
+    <div class="batch-actions">
+      <button class="secondary" id="batchPreview">Vorschau</button>
+      <button class="primary" id="batchCreate" disabled>Erstellen</button>
+    </div>
   </div>
 </div>
 

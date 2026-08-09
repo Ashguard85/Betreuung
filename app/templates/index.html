@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="64x64" href="/static/favicon-64.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/app.css?v=9">
+  <link rel="stylesheet" href="/static/app.css?v=10">
   <title>{{ title }}</title>
 </head>
 <body>
@@ -18,7 +18,7 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <div class="logo">B</div>
+      <div class="logo"><img src="/static/apple-touch-icon.png" alt=""></div>
       <div><h1>{{ title }}</h1><p id="subtitle">Familienplan</p></div>
     </div>
     {% if auth_enabled %}<form id="logoutForm" method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>{% endif %}
@@ -300,6 +300,6 @@
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

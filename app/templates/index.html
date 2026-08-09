@@ -21,7 +21,7 @@
       <div class="logo">N</div>
       <div><h1>{{ title }}</h1><p id="subtitle">Familienplan</p></div>
     </div>
-    <form id="logoutForm" method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>
+    {% if auth_enabled %}<form id="logoutForm" method="post" action="/logout"><button class="iconbtn" title="Abmelden">↪</button></form>{% endif %}
   </header>
 
   <section id="homePage" class="page active">
@@ -102,7 +102,7 @@
   <section id="settingsPage" class="page">
     <div class="hero">
       <h2>Einstellungen</h2>
-      <p>Personen, Kalenderfeed, Import und Datensicherung.</p>
+      <p>Personen, Ferien, Feiertage, Kalenderfeed und Datensicherung.</p>
     </div>
 
     <div class="grid two">
@@ -114,6 +114,54 @@
           <input id="newColor" type="color" value="#e8e8e8" class="color">
           <button class="secondary" id="addPerson">+</button>
         </div>
+      </div>
+
+
+      <div class="card period-card">
+        <h3>Ferien & Feiertage</h3>
+        <p class="small">Ferien kannst du als ganzen Zeitraum erfassen. Feiertage lassen sich zusätzlich aus einer .ics-Datei importieren.</p>
+
+        <div class="period-form-grid topgap">
+          <div>
+            <label class="label">Von</label>
+            <input id="periodStart" class="input" type="date">
+          </div>
+          <div>
+            <label class="label">Bis</label>
+            <input id="periodEnd" class="input" type="date">
+          </div>
+          <div>
+            <label class="label">Art</label>
+            <select id="periodKind" class="input">
+              <option value="vacation">Ferien</option>
+              <option value="holiday">Feiertag</option>
+              <option value="other">Anderer Zeitraum</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Farbe</label>
+            <input id="periodColor" class="color period-color" type="color" value="#f2a65a">
+          </div>
+        </div>
+        <label class="label topgap">Bezeichnung</label>
+        <input id="periodLabel" class="input" placeholder="z. B. Sommerferien">
+        <button id="addPeriod" class="secondary topgap full">Zeitraum speichern</button>
+
+        <div id="periodList" class="period-list topgap"></div>
+
+        <hr class="separator">
+        <h3>Feiertagskalender importieren</h3>
+        <p class="small">Importiert ganztägige Termine aus einer iCalendar-Datei (.ics). Beim erneuten Import werden Termine mit derselben UID aktualisiert.</p>
+        <form id="icsImportForm" class="topgap">
+          <input class="input" type="file" name="file" accept=".ics,text/calendar" required>
+          <div class="row topgap">
+            <label class="small">Feiertagsfarbe</label>
+            <input id="icsColor" name="color" class="color" type="color" value="#d65a6f">
+            <input type="hidden" name="kind" value="holiday">
+            <span class="spacer"></span>
+            <button class="secondary" type="submit">ICS importieren</button>
+          </div>
+        </form>
       </div>
 
       <div class="card">

@@ -1,5 +1,6 @@
 let people = [];
 let entries = [];
+let periods = [];
 let selectedQuick = null;
 let selectedModal = null;
 let editingId = null;
@@ -49,6 +50,11 @@ async function loadEntries(){
   entries = await api("/api/entries");
   renderAll();
 }
+async function loadPeriods(){
+  periods = await api("/api/periods");
+  renderPeriodSettings();
+  renderYear();
+}
 
 function renderPersonButtons(target, mode){
   const selected = mode==="quick" ? selectedQuick : selectedModal;
@@ -79,7 +85,7 @@ function showPage(name){
   qsa(".navbtn").forEach(b=>b.classList.toggle("active",b.dataset.page===name));
   if(name==="list") renderList();
   if(name==="year"){ renderYear(); renderStatsByPerson(); }
-  if(name==="settings") loadConfig();
+  if(name==="settings"){ loadConfig(); renderPeriodSettings(); }
   window.scrollTo({top:0,behavior:"smooth"});
 }
 function renderNext(){
@@ -123,10 +129,32 @@ function renderStats(){
   qs("#statPeople").textContent=new Set(entries.map(e=>e.person)).size;
   qs("#statYear").textContent=entries.filter(e=>e.day.startsWith(year)).length;
 }
+function periodKindName(kind){
+  return kind==="vacation" ? "Ferien" : kind==="holiday" ? "Feiertag" : "Zeitraum";
+}
+function periodMapForYear(year){
+  const map=new Map();
+  const first=new Date(year,0,1,12);
+  const last=new Date(year,11,31,12);
+  for(const p of periods){
+    let start=new Date(p.start_day+"T12:00:00");
+    let end=new Date(p.end_day+"T12:00:00");
+    if(end<first || start>last) continue;
+    if(start<first) start=new Date(first);
+    if(end>last) end=new Date(last);
+    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){
+      const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      if(!map.has(iso)) map.set(iso,[]);
+      map.get(iso).push(p);
+    }
+  }
+  return map;
+}
 function renderYear(){
   const year=Number(qs("#yearSelect").value);
   const months=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
   const byDay=new Map(entries.filter(e=>e.day.startsWith(String(year))).map(e=>[e.day,e]));
+  const marks=periodMapForYear(year);
   let out='<table class="year"><colgroup><col class="day-col">'+months.map(()=>'<col class="month-col">').join("")+'</colgroup><thead><tr><th>Tag</th>'+months.map(m=>`<th>${m}</th>`).join("")+'</tr></thead><tbody>';
   for(let day=1;day<=31;day++){
     out+=`<tr><td>${day}</td>`;
@@ -136,17 +164,30 @@ function renderYear(){
       if(!valid){out+='<td class="invalid"></td>';continue;}
       const iso=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
       const e=byDay.get(iso);
+      const dayMarks=marks.get(iso)||[];
       const weekend=d.getDay()===0||d.getDay()===6;
       const fill=e?`<div class="entry-fill" style="background:${esc(e.color)}"><span>${esc(e.person)}</span></div>`:"";
-      out+=`<td class="${weekend?"weekend":""}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}">${fill}</td>`;
+      const markTitle=dayMarks.map(p=>`${periodKindName(p.kind)}: ${p.label}`).join(" · ");
+      const rail=dayMarks.length?`<div class="period-rail" title="${esc(markTitle)}">${dayMarks.map(p=>`<span class="period-segment" style="background:${esc(p.color)}"></span>`).join("")}</div>`:"";
+      const cellClass=[weekend?"weekend":"",dayMarks.length?"has-period":""].filter(Boolean).join(" ");
+      out+=`<td class="${cellClass}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}"><div class="year-cell-content">${fill}${rail}</div></td>`;
     }
     out+='</tr>';
   }
   out+='</tbody></table>';
   qs("#yearTableWrap").innerHTML=out;
-  qs("#legend").innerHTML=people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span>`;
+  const periodLegend=[];
+  const seen=new Set();
+  for(const p of periods.filter(p=>p.start_day<=`${year}-12-31`&&p.end_day>=`${year}-01-01`)){
+    const key=`${p.kind}|${p.color}`;
+    if(seen.has(key)) continue;
+    seen.add(key);
+    periodLegend.push(`<span class="period-legend"><i class="bar-swatch" style="background:${esc(p.color)}"></i>${periodKindName(p.kind)}</span>`);
+  }
+  qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span>`+periodLegend.join("");
   qs("#csvLink").href=`/export.csv?year=${year}`;
 }
+
 async function renderStatsByPerson(){
   const year=qs("#yearSelect").value;
   const data=await api(`/api/stats?year=${encodeURIComponent(year)}`);
@@ -200,6 +241,36 @@ async function deletePerson(id){
   try{await api(`/api/people/${id}`,{method:"DELETE"});await loadPeople();await loadEntries();toast("Person gelöscht");}
   catch(e){toast(e.message);}
 }
+function renderPeriodSettings(){
+  const box=qs("#periodList");
+  if(!box) return;
+  box.innerHTML=periods.length?periods.map(p=>{
+    const same=p.start_day===p.end_day;
+    const range=same?p.start_day:`${p.start_day} - ${p.end_day}`;
+    return `<div class="period-item"><span class="bar-swatch large" style="background:${esc(p.color)}"></span><div><b>${esc(p.label)}</b><div class="small">${periodKindName(p.kind)} · ${esc(range)}${p.source==="ics"?" · ICS":""}</div></div><button class="mini danger" onclick="deletePeriod(${p.id})">×</button></div>`;
+  }).join(""):'<div class="small">Noch keine Ferien oder Feiertage erfasst.</div>';
+  applyOnlineState();
+}
+async function addPeriod(){
+  const start=qs("#periodStart").value;
+  const end=qs("#periodEnd").value;
+  const kind=qs("#periodKind").value;
+  const label=qs("#periodLabel").value.trim();
+  const color=qs("#periodColor").value;
+  if(!start||!end) return toast("Von und Bis wählen");
+  try{
+    await api("/api/periods",{method:"POST",body:JSON.stringify({start_day:start,end_day:end,kind,label,color})});
+    qs("#periodLabel").value="";
+    await loadPeriods();
+    toast("Zeitraum gespeichert");
+  }catch(e){toast(e.message);}
+}
+async function deletePeriod(id){
+  if(!confirm("Zeitraum wirklich löschen?")) return;
+  try{await api(`/api/periods/${id}`,{method:"DELETE"});await loadPeriods();toast("Zeitraum gelöscht");}
+  catch(e){toast(e.message);}
+}
+
 async function loadConfig(){
   const c=await api("/api/config");
   qs("#dataFile").textContent=c.data_file+"  |  Backups: "+c.backup_dir;
@@ -219,10 +290,10 @@ function applyOnlineState(){
   document.body.classList.toggle("is-offline",!online);
   const banner=qs("#offlineBanner");
   if(banner) banner.hidden=online;
-  ["#quickSave","#modalSave","#modalDelete","#addPerson"].forEach(sel=>{
+  ["#quickSave","#modalSave","#modalDelete","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!online;
   });
-  qsa("#importForm input,#importForm button,#peopleSettings input,#peopleSettings button,#newPerson,#newColor").forEach(el=>el.disabled=!online);
+  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor").forEach(el=>el.disabled=!online);
   qsa(".server-export").forEach(el=>{
     el.setAttribute("aria-disabled",online?"false":"true");
     el.tabIndex=online?0:-1;
@@ -230,7 +301,7 @@ function applyOnlineState(){
 }
 
 async function refreshAfterReconnect(){
-  try{await loadPeople();await loadEntries();await loadConfig();toast("Wieder online - Daten aktualisiert");}
+  try{await loadPeople();await loadEntries();await loadPeriods();await loadConfig();toast("Wieder online - Daten aktualisiert");}
   catch(e){toast(e.message);}
 }
 
@@ -304,6 +375,25 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     try{await navigator.clipboard.writeText(qs("#copyIcal").dataset.url);toast("Kalenderlink kopiert");}
     catch{toast("Link markieren und kopieren");}
   });
+  qs("#periodStart").value=isoToday();
+  qs("#periodEnd").value=isoToday();
+  qs("#addPeriod").addEventListener("click",addPeriod);
+  qs("#periodKind").addEventListener("change",()=>{
+    qs("#periodColor").value=qs("#periodKind").value==="holiday"?"#d65a6f":qs("#periodKind").value==="vacation"?"#f2a65a":"#80a4c2";
+  });
+  qs("#icsImportForm").addEventListener("submit",async(e)=>{
+    e.preventDefault();
+    if(!navigator.onLine) return toast("ICS Import benötigt eine Serververbindung");
+    const fd=new FormData(e.target);
+    try{
+      const res=await fetch("/import.ics",{method:"POST",body:fd});
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.error||"ICS Import fehlgeschlagen");
+      await loadPeriods();
+      toast(`${data.imported} Feiertage importiert${data.skipped?`, ${data.skipped} übersprungen`:""}`);
+    }catch(err){toast(err.message);}
+  });
+
   const logoutForm=qs("#logoutForm");
   if(logoutForm) logoutForm.addEventListener("submit",()=>{
     if(navigator.serviceWorker?.controller) navigator.serviceWorker.controller.postMessage({type:"CLEAR_PRIVATE_DATA"});
@@ -324,6 +414,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   await registerPwa();
   try{await loadPeople();}catch(e){toast(e.message);}
   try{await loadEntries();}catch(e){toast(e.message);}
+  try{await loadPeriods();}catch(e){toast(e.message);}
   try{await loadConfig();}catch(e){if(navigator.onLine) toast(e.message);}
   applyOnlineState();
 });

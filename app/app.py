@@ -2,10 +2,11 @@ import csv
 import hmac
 import io
 import os
+import re
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from functools import wraps
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
@@ -26,12 +27,13 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
 DB_PATH = DATA_DIR / "betreuung.sqlite"
 BACKUP_DIR = DATA_DIR / "backups"
 BACKUP_KEEP = max(5, int(os.getenv("BACKUP_KEEP", "50")))
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 APP_USER = os.getenv("APP_USER", "familie")
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 ICAL_TOKEN = os.getenv("ICAL_TOKEN", "")
 
-if not APP_PASSWORD:
-    raise RuntimeError("APP_PASSWORD muss gesetzt sein.")
+if AUTH_ENABLED and not APP_PASSWORD:
+    raise RuntimeError("APP_PASSWORD muss gesetzt sein, wenn AUTH_ENABLED=true ist.")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,6 +88,21 @@ def init_db():
         );
 
         CREATE INDEX IF NOT EXISTS idx_entries_day ON entries(day);
+
+        CREATE TABLE IF NOT EXISTS periods (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          start_day TEXT NOT NULL,
+          end_day TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'vacation',
+          label TEXT NOT NULL DEFAULT '',
+          color TEXT NOT NULL DEFAULT '#f2a65a',
+          source TEXT NOT NULL DEFAULT 'manual',
+          external_uid TEXT UNIQUE,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_periods_range ON periods(start_day, end_day);
         """)
         existing = conn.execute("SELECT COUNT(*) AS c FROM people").fetchone()["c"]
         if existing == 0:
@@ -122,6 +139,8 @@ init_db()
 def login_required(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
+        if not AUTH_ENABLED:
+            return fn(*args, **kwargs)
         if not session.get("logged_in"):
             if request.path.startswith("/api/"):
                 return jsonify({"error": "not_authenticated"}), 401
@@ -142,13 +161,13 @@ def healthz():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if not AUTH_ENABLED:
+        return redirect(url_for("index"))
     error = None
     if request.method == "POST":
         user = request.form.get("user", "")
         password = request.form.get("password", "")
-        ok_user = hmac.compare_digest(user, APP_USER)
-        ok_pass = hmac.compare_digest(password, APP_PASSWORD)
-        if ok_user and ok_pass:
+        if hmac.compare_digest(user, APP_USER) and hmac.compare_digest(password, APP_PASSWORD):
             session.clear()
             session["logged_in"] = True
             return redirect(request.args.get("next") or url_for("index"))
@@ -159,7 +178,7 @@ def login():
 @app.post("/logout")
 def logout():
     session.clear()
-    response = redirect(url_for("login"))
+    response = redirect(url_for("login") if AUTH_ENABLED else url_for("index"))
     response.headers["Clear-Site-Data"] = '"cache"'
     return response
 
@@ -167,7 +186,7 @@ def logout():
 @app.get("/")
 @login_required
 def index():
-    return render_template("index.html", title=APP_TITLE)
+    return render_template("index.html", title=APP_TITLE, auth_enabled=AUTH_ENABLED)
 
 
 @app.get("/manifest.webmanifest")
@@ -233,6 +252,7 @@ def api_config():
         "ical_url": (request.url_root.rstrip("/") + "/calendar.ics?token=" + ICAL_TOKEN) if ICAL_TOKEN else None,
         "data_file": str(DB_PATH),
         "backup_dir": str(BACKUP_DIR),
+        "auth_enabled": AUTH_ENABLED,
     })
 
 
@@ -387,6 +407,250 @@ def api_entries_delete(entry_id):
     backup_db("entry-delete")
     return jsonify({"ok": True})
 
+
+
+def valid_color(value, fallback="#ececec"):
+    value = str(value or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+        return value.lower()
+    return fallback
+
+
+def period_rows(year=""):
+    query = """
+      SELECT id,start_day,end_day,kind,label,color,source,external_uid,created_at,updated_at
+      FROM periods
+    """
+    params = []
+    if year:
+        query += " WHERE start_day <= ? AND end_day >= ?"
+        params = [f"{year}-12-31", f"{year}-01-01"]
+    query += " ORDER BY start_day ASC, end_day ASC, label ASC"
+    with db() as conn:
+        return [dict(r) for r in conn.execute(query, tuple(params)).fetchall()]
+
+
+@app.get("/api/periods")
+@login_required
+def api_periods():
+    year = request.args.get("year", "").strip()
+    return jsonify(period_rows(year))
+
+
+@app.post("/api/periods")
+@login_required
+def api_periods_add():
+    payload = request.get_json(force=True)
+    start_day = valid_iso_day(str(payload.get("start_day", "")))
+    end_day = valid_iso_day(str(payload.get("end_day", "")))
+    kind = str(payload.get("kind", "vacation")).strip() or "vacation"
+    label = str(payload.get("label", "")).strip()
+    default_color = "#f2a65a" if kind == "vacation" else "#d65a6f" if kind == "holiday" else "#80a4c2"
+    color = valid_color(payload.get("color"), default_color)
+    if not start_day or not end_day:
+        return jsonify({"error": "Start- und Enddatum sind erforderlich"}), 400
+    if end_day < start_day:
+        return jsonify({"error": "Enddatum muss nach dem Startdatum liegen"}), 400
+    if not label:
+        label = "Ferien" if kind == "vacation" else "Feiertag" if kind == "holiday" else "Zeitraum"
+    now = datetime.now().isoformat(timespec="seconds")
+    with db() as conn:
+        cur = conn.execute(
+            """INSERT INTO periods(start_day,end_day,kind,label,color,source,created_at,updated_at)
+               VALUES(?,?,?,?,?,'manual',?,?)""",
+            (start_day, end_day, kind, label, color, now, now),
+        )
+        period_id = cur.lastrowid
+    backup_db("period-add")
+    return jsonify({"id": period_id}), 201
+
+
+@app.put("/api/periods/<int:period_id>")
+@login_required
+def api_periods_update(period_id):
+    payload = request.get_json(force=True)
+    start_day = valid_iso_day(str(payload.get("start_day", "")))
+    end_day = valid_iso_day(str(payload.get("end_day", "")))
+    kind = str(payload.get("kind", "vacation")).strip() or "vacation"
+    label = str(payload.get("label", "")).strip()
+    default_color = "#f2a65a" if kind == "vacation" else "#d65a6f" if kind == "holiday" else "#80a4c2"
+    color = valid_color(payload.get("color"), default_color)
+    if not start_day or not end_day or end_day < start_day:
+        return jsonify({"error": "Ungültiger Zeitraum"}), 400
+    if not label:
+        label = "Ferien" if kind == "vacation" else "Feiertag" if kind == "holiday" else "Zeitraum"
+    with db() as conn:
+        conn.execute(
+            """UPDATE periods SET start_day=?,end_day=?,kind=?,label=?,color=?,updated_at=?
+               WHERE id=?""",
+            (start_day, end_day, kind, label, color, datetime.now().isoformat(timespec="seconds"), period_id),
+        )
+    backup_db("period-update")
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/periods/<int:period_id>")
+@login_required
+def api_periods_delete(period_id):
+    with db() as conn:
+        conn.execute("DELETE FROM periods WHERE id=?", (period_id,))
+    backup_db("period-delete")
+    return jsonify({"ok": True})
+
+
+def unfold_ics_lines(raw):
+    lines = raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    unfolded = []
+    for line in lines:
+        if line.startswith((" ", "\t")) and unfolded:
+            unfolded[-1] += line[1:]
+        else:
+            unfolded.append(line)
+    return unfolded
+
+
+def ics_unescape(value):
+    return (str(value or "")
+            .replace("\\n", "\n")
+            .replace("\\N", "\n")
+            .replace("\\,", ",")
+            .replace("\\;", ";")
+            .replace("\\\\", "\\"))
+
+
+def parse_ics_date(value):
+    value = str(value or "").strip()
+    match = re.search(r"(\d{8})", value)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def parse_ics_events(raw):
+    events = []
+    current = None
+    for line in unfold_ics_lines(raw):
+        upper = line.upper()
+        if upper == "BEGIN:VEVENT":
+            current = {}
+            continue
+        if upper == "END:VEVENT":
+            if current is not None:
+                events.append(current)
+            current = None
+            continue
+        if current is None or ":" not in line:
+            continue
+        left, value = line.split(":", 1)
+        name = left.split(";", 1)[0].upper()
+        current[name] = (left, value)
+    return events
+
+
+def expand_ics_dates(event):
+    dtstart_prop = event.get("DTSTART")
+    if not dtstart_prop:
+        return []
+    start_obj = parse_ics_date(dtstart_prop[1])
+    if not start_obj:
+        return []
+
+    dtend_prop = event.get("DTEND")
+    end_obj = parse_ics_date(dtend_prop[1]) if dtend_prop else start_obj
+    if not end_obj:
+        end_obj = start_obj
+    if dtend_prop and "VALUE=DATE" in dtend_prop[0].upper() and end_obj > start_obj:
+        end_obj -= timedelta(days=1)
+    if end_obj < start_obj:
+        end_obj = start_obj
+    duration = end_obj - start_obj
+
+    rrule_prop = event.get("RRULE")
+    if not rrule_prop or "FREQ=YEARLY" not in rrule_prop[1].upper():
+        return [(start_obj, end_obj, None)]
+
+    rule = {}
+    for part in rrule_prop[1].split(";"):
+        if "=" in part:
+            key, value = part.split("=", 1)
+            rule[key.upper()] = value
+
+    month = int(rule.get("BYMONTH", start_obj.month))
+    monthday = int(rule.get("BYMONTHDAY", start_obj.day))
+    until_obj = parse_ics_date(rule.get("UNTIL", "")) if rule.get("UNTIL") else None
+    current_year = date.today().year
+    first_year = max(start_obj.year, current_year - 1)
+    last_year = current_year + 5
+    if until_obj:
+        last_year = min(last_year, until_obj.year)
+    dates = []
+    for year in range(first_year, last_year + 1):
+        try:
+            occurrence_start = date(year, month, monthday)
+        except ValueError:
+            continue
+        if occurrence_start < start_obj:
+            continue
+        if until_obj and occurrence_start > until_obj:
+            continue
+        dates.append((occurrence_start, occurrence_start + duration, year))
+    return dates
+
+
+@app.post("/import.ics")
+@login_required
+def import_ics():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "Keine ICS-Datei ausgewählt"}), 400
+    raw_bytes = file.read()
+    try:
+        raw = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raw = raw_bytes.decode("latin-1")
+
+    kind = request.form.get("kind", "holiday").strip() or "holiday"
+    default_color = "#d65a6f" if kind == "holiday" else "#f2a65a"
+    color = valid_color(request.form.get("color"), default_color)
+    imported = 0
+    skipped = 0
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with db() as conn:
+        for event in parse_ics_events(raw):
+            occurrences = expand_ics_dates(event)
+            if not occurrences:
+                skipped += 1
+                continue
+
+            summary = ics_unescape(event.get("SUMMARY", ("SUMMARY", "Feiertag"))[1]).strip() or "Feiertag"
+            uid = ics_unescape(event.get("UID", ("UID", ""))[1]).strip()
+
+            for start_obj, end_obj, recurrence_year in occurrences:
+                base_uid = uid if uid else f"{start_obj.isoformat()}:{end_obj.isoformat()}:{summary}"
+                external_uid = "ics:" + base_uid + (f":{recurrence_year}" if recurrence_year else "")
+
+                conn.execute(
+                    """INSERT INTO periods(start_day,end_day,kind,label,color,source,external_uid,created_at,updated_at)
+                       VALUES(?,?,?,?,?,'ics',?,?,?)
+                       ON CONFLICT(external_uid) DO UPDATE SET
+                         start_day=excluded.start_day,
+                         end_day=excluded.end_day,
+                         kind=excluded.kind,
+                         label=excluded.label,
+                         color=excluded.color,
+                         source='ics',
+                         updated_at=excluded.updated_at""",
+                    (start_obj.isoformat(), end_obj.isoformat(), kind, summary, color, external_uid, now, now),
+                )
+                imported += 1
+
+    if imported:
+        backup_db("ics-import")
+    return jsonify({"ok": True, "imported": imported, "skipped": skipped})
 
 def filtered_entry_rows(year="", person="", search=""):
     clauses = []

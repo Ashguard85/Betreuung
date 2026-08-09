@@ -22,7 +22,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
-APP_TITLE = os.getenv("APP_TITLE", "Noemi Betreuung")
+APP_TITLE = os.getenv("APP_TITLE", "Betreuungsplan")
 DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
 DB_PATH = DATA_DIR / "betreuung.sqlite"
 BACKUP_DIR = DATA_DIR / "backups"
@@ -406,6 +406,128 @@ def api_entries_delete(entry_id):
         conn.execute("DELETE FROM entries WHERE id=?", (entry_id,))
     backup_db("entry-delete")
     return jsonify({"ok": True})
+
+
+def parse_batch_payload():
+    payload = request.get_json(force=True)
+    start_day = valid_iso_day(str(payload.get("start_day", "")))
+    end_day = valid_iso_day(str(payload.get("end_day", "")))
+    person_id = payload.get("person_id")
+    note = str(payload.get("note", "")).strip()
+
+    try:
+        person_id = int(person_id)
+        weekday = int(payload.get("weekday"))
+    except (TypeError, ValueError):
+        return None, "Betreuung und Wochentag sind erforderlich"
+
+    if not start_day or not end_day:
+        return None, "Von und Bis sind erforderlich"
+    if not 0 <= weekday <= 6:
+        return None, "Ungültiger Wochentag"
+
+    start_obj = date.fromisoformat(start_day)
+    end_obj = date.fromisoformat(end_day)
+    if end_obj < start_obj:
+        return None, "Bis muss am oder nach Von liegen"
+    if (end_obj - start_obj).days > 366 * 5:
+        return None, "Der Zeitraum darf maximal fünf Jahre umfassen"
+
+    with db() as conn:
+        person = conn.execute(
+            "SELECT id,name,color FROM people WHERE id=?", (person_id,)
+        ).fetchone()
+    if not person:
+        return None, "Betreuungsperson wurde nicht gefunden"
+
+    first_offset = (weekday - start_obj.weekday()) % 7
+    current = start_obj + timedelta(days=first_offset)
+    days = []
+    while current <= end_obj:
+        days.append(current.isoformat())
+        current += timedelta(days=7)
+
+    return {
+        "start_day": start_day,
+        "end_day": end_day,
+        "weekday": weekday,
+        "person_id": person_id,
+        "person": dict(person),
+        "note": note,
+        "days": days,
+    }, None
+
+
+def batch_preview_data(batch):
+    days = batch["days"]
+    occupied = []
+    if days:
+        placeholders = ",".join("?" for _ in days)
+        with db() as conn:
+            rows = conn.execute(
+                f"""SELECT e.day,p.name AS person
+                    FROM entries e
+                    JOIN people p ON p.id=e.person_id
+                    WHERE e.day IN ({placeholders})
+                    ORDER BY e.day""",
+                tuple(days),
+            ).fetchall()
+        occupied = [dict(r) for r in rows]
+
+    occupied_days = {r["day"] for r in occupied}
+    create_days = [d for d in days if d not in occupied_days]
+    return {
+        "matched_count": len(days),
+        "create_count": len(create_days),
+        "skipped_count": len(occupied),
+        "occupied": occupied,
+        "first_day": days[0] if days else None,
+        "last_day": days[-1] if days else None,
+    }
+
+
+@app.post("/api/entries/batch/preview")
+@login_required
+def api_entries_batch_preview():
+    batch, error = parse_batch_payload()
+    if error:
+        return jsonify({"error": error}), 400
+    preview = batch_preview_data(batch)
+    preview.update({
+        "person": batch["person"]["name"],
+        "weekday": batch["weekday"],
+    })
+    return jsonify(preview)
+
+
+@app.post("/api/entries/batch")
+@login_required
+def api_entries_batch_create():
+    batch, error = parse_batch_payload()
+    if error:
+        return jsonify({"error": error}), 400
+
+    now = datetime.now().isoformat(timespec="seconds")
+    created = 0
+    with db() as conn:
+        for day in batch["days"]:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO entries(day,person_id,note,created_at,updated_at)
+                   VALUES(?,?,?,?,?)""",
+                (day, batch["person_id"], batch["note"], now, now),
+            )
+            if cur.rowcount == 1:
+                created += 1
+
+    if created:
+        backup_db("entry-batch")
+
+    return jsonify({
+        "ok": True,
+        "matched_count": len(batch["days"]),
+        "created_count": created,
+        "skipped_count": len(batch["days"]) - created,
+    }), 201 if created else 200
 
 
 
@@ -901,7 +1023,7 @@ def calendar_ics():
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//Noemi Betreuung//DE",
+        "PRODID:-//Betreuungsplan//DE",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
         f"X-WR-CALNAME:{ics_escape(APP_TITLE)}",

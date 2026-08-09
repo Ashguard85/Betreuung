@@ -1,10 +1,11 @@
-# Noemi Betreuung
+# Betreuungsplan
 
 Kleine iPhone-first PWA für einen einfachen Betreuungsplan.
 
 ## Funktionen
 
 - ein Betreuungseintrag pro Datum
+- Batch-Generierung für einen festen Wochentag über einen Von/Bis-Zeitraum
 - Betreuungsperson per großen Buttons auswählen
 - optionale Bemerkung
 - fortlaufende Liste + Filter
@@ -68,6 +69,13 @@ backups/
 ```
 
 Der Code kommt aus Git. Die Daten liegen **nicht** im Git-Repository und bleiben bei Updates oder Container-Neubauten erhalten.
+
+
+## Mehrere Einträge auf einmal
+
+Unter **Eintragen → Mehrere Einträge erstellen** kannst du eine Betreuungsperson, einen festen Wochentag sowie `Von` und `Bis` festlegen. Die Vorschau zeigt, wie viele passende Termine gefunden wurden, wie viele neu erstellt werden und wie viele wegen bereits belegter Tage übersprungen werden.
+
+Beim Erstellen werden ausschließlich normale Einzeltermine in `entries` angelegt. Es wird **keine Serie gespeichert**. Jeder erzeugte Termin kann danach unabhängig bearbeitet oder gelöscht werden. Bestehende Betreuungseinträge werden nicht überschrieben.
 
 ## Ferien und Feiertage
 

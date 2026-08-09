@@ -3,6 +3,8 @@ let entries = [];
 let periods = [];
 let selectedQuick = null;
 let selectedModal = null;
+let selectedBatch = null;
+let batchPreviewKey = null;
 let editingId = null;
 let reloadingForServiceWorker = false;
 
@@ -41,8 +43,10 @@ async function loadPeople(){
   people = await api("/api/people");
   if (!selectedQuick && people.length) selectedQuick = people[0].id;
   if (!selectedModal && people.length) selectedModal = people[0].id;
+  if (!selectedBatch && people.length) selectedBatch = people[0].id;
   renderPersonButtons("#quickPeople","quick");
   renderPersonButtons("#modalPeople","modal");
+  renderPersonButtons("#batchPeople","batch");
   renderPersonFilter();
   renderPeopleSettings();
 }
@@ -57,15 +61,26 @@ async function loadPeriods(){
 }
 
 function renderPersonButtons(target, mode){
-  const selected = mode==="quick" ? selectedQuick : selectedModal;
-  qs(target).innerHTML = people.map(p=>`
+  const container=qs(target);
+  if(!container) return;
+  const selected = mode==="quick" ? selectedQuick : mode==="batch" ? selectedBatch : selectedModal;
+  container.innerHTML = people.map(p=>`
     <button class="person-btn ${Number(selected)===Number(p.id)?"selected":""}"
       style="background:${esc(p.color)}" onclick="selectPerson('${mode}',${p.id})">${esc(p.name)}</button>
   `).join("");
 }
 function selectPerson(mode,id){
-  if(mode==="quick") selectedQuick=id; else selectedModal=id;
-  renderPersonButtons(mode==="quick"?"#quickPeople":"#modalPeople",mode);
+  if(mode==="quick") {
+    selectedQuick=id;
+    renderPersonButtons("#quickPeople",mode);
+  } else if(mode==="batch") {
+    selectedBatch=id;
+    renderPersonButtons("#batchPeople",mode);
+    resetBatchPreview();
+  } else {
+    selectedModal=id;
+    renderPersonButtons("#modalPeople",mode);
+  }
 }
 
 function yearOptions(select){
@@ -212,6 +227,78 @@ function openModal(id=null){
 }
 function closeModal(){qs("#modalBack").classList.remove("open");editingId=null;}
 function prefillDate(day){openModal();qs("#modalDate").value=day;}
+
+function formatIsoDate(day){
+  if(!day) return "";
+  const d=new Date(day+"T12:00:00");
+  return d.toLocaleDateString("de-CH",{day:"2-digit",month:"2-digit",year:"numeric"});
+}
+function resetBatchPreview(){
+  batchPreviewKey=null;
+  const box=qs("#batchPreviewBox");
+  if(box){ box.hidden=true; box.innerHTML=""; }
+  const create=qs("#batchCreate");
+  if(create) create.disabled=true;
+}
+function batchPayload(){
+  return {
+    person_id:Number(selectedBatch),
+    weekday:Number(qs("#batchWeekday").value),
+    start_day:qs("#batchStart").value,
+    end_day:qs("#batchEnd").value,
+    note:qs("#batchNote").value.trim(),
+  };
+}
+function openBatchModal(){
+  if(!navigator.onLine) return toast("Batch-Erstellung benötigt eine Serververbindung");
+  selectedBatch=selectedQuick || people[0]?.id || null;
+  renderPersonButtons("#batchPeople","batch");
+  const now=new Date();
+  qs("#batchStart").value=isoToday();
+  qs("#batchEnd").value=`${now.getFullYear()}-12-31`;
+  qs("#batchWeekday").value=String((now.getDay()+6)%7);
+  qs("#batchNote").value="";
+  resetBatchPreview();
+  qs("#batchModalBack").classList.add("open");
+  applyOnlineState();
+}
+function closeBatchModal(){
+  qs("#batchModalBack").classList.remove("open");
+  resetBatchPreview();
+}
+async function previewBatch(){
+  if(!selectedBatch) return toast("Betreuung wählen");
+  const payload=batchPayload();
+  if(!payload.start_day||!payload.end_day) return toast("Von und Bis wählen");
+  try{
+    const data=await api("/api/entries/batch/preview",{method:"POST",body:JSON.stringify(payload)});
+    const weekday=qs("#batchWeekday").selectedOptions[0]?.textContent || "Wochentag";
+    let details="";
+    if(data.occupied?.length){
+      const shown=data.occupied.slice(0,6).map(x=>`${formatIsoDate(x.day)} (${esc(x.person)})`).join(" · ");
+      const more=data.occupied.length>6?` · +${data.occupied.length-6} weitere`:"";
+      details=`<div class="small topgap">Bereits belegt: ${shown}${more}</div>`;
+    }
+    qs("#batchPreviewBox").innerHTML=`<b>${data.matched_count} ${esc(weekday)} gefunden</b><div>${data.create_count} neu · ${data.skipped_count} bereits belegt und werden übersprungen</div>${details}`;
+    qs("#batchPreviewBox").hidden=false;
+    batchPreviewKey=JSON.stringify(payload);
+    qs("#batchCreate").disabled=data.create_count===0;
+  }catch(e){ resetBatchPreview(); toast(e.message); }
+}
+async function createBatch(){
+  const payload=batchPayload();
+  if(batchPreviewKey!==JSON.stringify(payload)){
+    resetBatchPreview();
+    return toast("Bitte Vorschau nochmals berechnen");
+  }
+  try{
+    const data=await api("/api/entries/batch",{method:"POST",body:JSON.stringify(payload)});
+    closeBatchModal();
+    await loadEntries();
+    toast(`${data.created_count} Einträge erstellt · ${data.skipped_count} übersprungen`);
+  }catch(e){toast(e.message);}
+}
+
 function toast(msg){
   const t=qs("#toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);
 }
@@ -290,10 +377,12 @@ function applyOnlineState(){
   document.body.classList.toggle("is-offline",!online);
   const banner=qs("#offlineBanner");
   if(banner) banner.hidden=online;
-  ["#quickSave","#modalSave","#modalDelete","#addPerson","#addPeriod"].forEach(sel=>{
+  ["#quickSave","#modalSave","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!online;
   });
-  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor").forEach(el=>el.disabled=!online);
+  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
+  const batchCreate=qs("#batchCreate");
+  if(batchCreate) batchCreate.disabled=!online || !batchPreviewKey;
   qsa(".server-export").forEach(el=>{
     el.setAttribute("aria-disabled",online?"false":"true");
     el.tabIndex=online?0:-1;
@@ -347,6 +436,12 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       await saveEntry(qs("#quickDate").value,selectedQuick,qs("#quickNote").value);
       qs("#quickNote").value="";toast("Gespeichert");
     }catch(e){toast(e.message);}
+  });
+  qs("#openBatch").addEventListener("click",openBatchModal);
+  qs("#batchPreview").addEventListener("click",previewBatch);
+  qs("#batchCreate").addEventListener("click",createBatch);
+  ["#batchWeekday","#batchStart","#batchEnd","#batchNote"].forEach(sel=>{
+    qs(sel).addEventListener(sel==="#batchNote"?"input":"change",resetBatchPreview);
   });
   qs("#modalSave").addEventListener("click",async()=>{
     try{

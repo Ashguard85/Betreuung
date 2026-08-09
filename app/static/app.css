@@ -28,3 +28,6 @@ table.year{border-collapse:separate;border-spacing:0;table-layout:fixed;min-widt
 body.is-offline .server-export{opacity:.45;pointer-events:none}
 body.is-offline button:disabled,body.is-offline input:disabled{opacity:.55;cursor:not-allowed}
 .pwa-offline-note{font-size:12px;color:var(--muted)}
+
+.batch-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.batch-grid>div:first-child{grid-column:1/-1}.batch-preview{border:1px solid #bfd3cc;background:#eef6f3;border-radius:14px;padding:12px 13px;font-size:13px;line-height:1.45}.batch-preview b{display:block;margin-bottom:3px}.batch-preview[hidden]{display:none!important}
+@media(min-width:560px){.batch-grid{grid-template-columns:1fr 1fr 1fr}.batch-grid>div:first-child{grid-column:auto}}

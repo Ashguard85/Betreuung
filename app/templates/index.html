@@ -72,7 +72,7 @@
       <input id="filterSearch" class="input" placeholder="Suchen …"/>
       <div class="list-actions">
         <a id="listCsvLink" class="secondary linkbtn server-export" href="#">CSV</a>
-        <a id="listPdfLink" class="secondary linkbtn server-export" href="#" target="_blank">PDF</a>
+        <button id="listPdfButton" class="secondary server-export" type="button">PDF / Teilen</button>
         <span id="listExportHint" class="small"></span>
       </div>
       <div class="space"></div>
@@ -87,7 +87,7 @@
     </div>
     <div class="year-toolbar">
       <select id="yearSelect" class="input fit"></select>
-      <button class="secondary" onclick="window.print()">Drucken / PDF</button>
+      <button id="yearPdfButton" class="secondary server-export" type="button">PDF / Drucken</button>
       <a id="csvLink" class="secondary linkbtn server-export" href="#">CSV</a>
       <span class="spacer"></span>
       <span class="small">↔ auf dem iPhone wischen</span>
@@ -182,10 +182,18 @@
       </div>
 
       <div class="card">
-        <h3>Datensicherung</h3>
+        <h3>Daten sichern / wiederherstellen</h3>
+        <p class="small">Komplett-Backup mit Betreuungspersonen, Einträgen, Ferien und Feiertagen. Unabhängig von der internen SQLite-Datei.</p>
+        <button id="fullDataExport" class="secondary full server-export" type="button">Komplett-Backup exportieren</button>
+        <form id="fullDataImportForm" class="topgap">
+          <input class="input" type="file" name="file" accept=".json,application/json" required>
+          <button class="secondary danger full topgap" type="submit">Backup wiederherstellen</button>
+        </form>
+        <p class="small">Beim Wiederherstellen werden die aktuellen App-Daten durch den Inhalt der Backup-Datei ersetzt. Vorher legt die App automatisch ein SQLite-Sicherheitsbackup an.</p>
+        <hr class="separator">
         <p class="ok">● SQLite persistent</p>
         <div id="dataFile" class="pathbox">/app/data/betreuung.sqlite</div>
-        <p class="small">Nach jeder Änderung erzeugt die App zusätzlich eine konsistente SQLite-Sicherung im Unterordner <b>backups</b>. Der gesamte Host-Ordner kann unabhängig vom Container gesichert werden.</p>
+        <p class="small">Zusätzlich erzeugt die App nach Änderungen konsistente SQLite-Sicherungen im Unterordner <b>backups</b>. Der gesamte Host-Ordner kann unabhängig vom Container gesichert werden.</p>
       </div>
     </div>
   </section>

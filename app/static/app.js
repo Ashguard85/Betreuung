@@ -177,7 +177,7 @@ function exportParams(){
 function updateExportControls(){
   const params=exportParams();
   qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
-  qs("#listPdfLink").href=`/export.pdf?${params.toString()}`;
+  qs("#listPdfButton").dataset.url=`/export.pdf?${params.toString()}`;
   const button=qs("#listExportPeople");
   if(button){
     if(exportPeopleAreAll()) button.textContent="Personen: Alle";
@@ -292,7 +292,7 @@ async function renderStatsByPerson(){
   const data=await api(`/api/stats?year=${encodeURIComponent(year)}`);
   qs("#personStats").innerHTML=data.per_person.length?data.per_person.map(x=>{
     const base=`year=${encodeURIComponent(year)}&person=${encodeURIComponent(x.name)}`;
-    return `<span class="stat-chip"><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.name)}: ${x.count} <a class="stat-chip-link server-export" href="/export.csv?${base}" title="CSV exportieren">CSV</a> <a class="stat-chip-link server-export" href="/export.pdf?${base}" target="_blank" title="PDF öffnen">PDF</a></span>`;
+    return `<span class="stat-chip"><i class="dot" style="background:${esc(x.color)}"></i>${esc(x.name)}: ${x.count} <a class="stat-chip-link server-export" href="/export.csv?${base}" title="CSV exportieren">CSV</a> <button class="stat-chip-link pdf-share-button server-export" type="button" data-url="/export.pdf?${base}" title="PDF teilen oder drucken">PDF</button></span>`;
   }).join(""):'<span class="small">Noch keine Einträge.</span>';
   applyOnlineState();
 }
@@ -457,6 +457,81 @@ async function loadConfig(){
 }
 
 
+
+function filenameFromDisposition(value, fallback){
+  if(!value) return fallback;
+  const utf=value.match(/filename\*=UTF-8''([^;]+)/i);
+  if(utf){try{return decodeURIComponent(utf[1].replace(/["']/g,""));}catch(_e){}}
+  const plain=value.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] || fallback;
+}
+
+async function shareServerPdf(url, fallbackName="betreuungsplan.pdf"){
+  if(!navigator.onLine){toast("PDF benötigt eine Serververbindung");return;}
+  try{
+    toast("PDF wird erstellt …");
+    const response=await fetch(url,{credentials:"same-origin",cache:"no-store"});
+    if(response.status===401){location.href="/login";return;}
+    if(!response.ok) throw new Error(`PDF konnte nicht erstellt werden (HTTP ${response.status})`);
+    const blob=await response.blob();
+    const filename=filenameFromDisposition(response.headers.get("content-disposition"),fallbackName);
+    const file=new File([blob],filename,{type:"application/pdf"});
+
+    if(navigator.share){
+      const canShareFiles=!navigator.canShare || navigator.canShare({files:[file]});
+      if(canShareFiles){
+        try{
+          await navigator.share({title:filename,files:[file]});
+          return;
+        }catch(error){
+          if(error?.name==="AbortError") return;
+          console.warn("Datei-Teilen fehlgeschlagen, verwende Download-Fallback",error);
+        }
+      }
+    }
+
+    const blobUrl=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=blobUrl;
+    link.download=filename;
+    link.rel="noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+    toast("PDF geöffnet");
+  }catch(error){
+    console.error(error);
+    toast(error.message || "PDF-Export fehlgeschlagen");
+  }
+}
+
+async function shareServerFile(url, fallbackName, mimeType){
+  if(!navigator.onLine){toast("Export benötigt eine Serververbindung");return;}
+  try{
+    toast("Backup wird erstellt …");
+    const response=await fetch(url,{credentials:"same-origin",cache:"no-store"});
+    if(response.status===401){location.href="/login";return;}
+    if(!response.ok) throw new Error(`Export fehlgeschlagen (HTTP ${response.status})`);
+    const blob=await response.blob();
+    const filename=filenameFromDisposition(response.headers.get("content-disposition"),fallbackName);
+    const file=new File([blob],filename,{type:mimeType || blob.type || "application/octet-stream"});
+    if(navigator.share){
+      const canShareFiles=!navigator.canShare || navigator.canShare({files:[file]});
+      if(canShareFiles){
+        try{await navigator.share({title:filename,files:[file]});return;}
+        catch(error){if(error?.name==="AbortError")return;}
+      }
+    }
+    const blobUrl=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=blobUrl; link.download=filename; link.rel="noopener";
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+    toast("Backup exportiert");
+  }catch(error){console.error(error);toast(error.message || "Export fehlgeschlagen");}
+}
+
 function applyOnlineState(){
   const online=navigator.onLine;
   document.body.classList.toggle("is-offline",!online);
@@ -465,12 +540,13 @@ function applyOnlineState(){
   ["#quickSave","#modalSave","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!online;
   });
-  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
+  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
   const batchCreate=qs("#batchCreate");
   if(batchCreate) batchCreate.disabled=!online || !batchPreviewKey;
   qsa(".server-export").forEach(el=>{
     el.setAttribute("aria-disabled",online?"false":"true");
     el.tabIndex=online?0:-1;
+    if("disabled" in el) el.disabled=!online;
   });
 }
 
@@ -506,6 +582,13 @@ async function registerPwa(){
 window.addEventListener("offline",()=>{applyOnlineState();toast("Offline - Änderungen sind deaktiviert");});
 window.addEventListener("online",()=>{applyOnlineState();refreshAfterReconnect();});
 document.addEventListener("click",e=>{
+  const pdfButton=e.target.closest(".pdf-share-button");
+  if(pdfButton){
+    e.preventDefault();
+    if(!navigator.onLine){toast("PDF benötigt eine Serververbindung");return;}
+    shareServerPdf(pdfButton.dataset.url,"betreuungsliste.pdf");
+    return;
+  }
   const link=e.target.closest("a.server-export");
   if(link && !navigator.onLine){e.preventDefault();toast("PDF/CSV Export benötigt eine Serververbindung");}
 });
@@ -526,6 +609,14 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   });
   qs("#openBatch").addEventListener("click",openBatchModal);
   qs("#listExportPeople").addEventListener("click",openExportPeopleModal);
+  qs("#listPdfButton").addEventListener("click",()=>{
+    const url=qs("#listPdfButton").dataset.url;
+    if(url) shareServerPdf(url,"betreuungsliste.pdf");
+  });
+  qs("#yearPdfButton").addEventListener("click",()=>{
+    const year=qs("#yearSelect").value;
+    shareServerPdf(`/export-year.pdf?year=${encodeURIComponent(year)}`,`jahresplan-${year}.pdf`);
+  });
   qs("#exportPeopleAll").addEventListener("click",()=>setExportPeopleChecks("all"));
   qs("#exportPeopleApply").addEventListener("click",applyExportPeopleSelection);
   qs("#batchPreview").addEventListener("click",previewBatch);
@@ -584,6 +675,25 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   const logoutForm=qs("#logoutForm");
   if(logoutForm) logoutForm.addEventListener("submit",()=>{
     if(navigator.serviceWorker?.controller) navigator.serviceWorker.controller.postMessage({type:"CLEAR_PRIVATE_DATA"});
+  });
+
+  qs("#fullDataExport").addEventListener("click",()=>{
+    shareServerFile("/export-data.json","betreuungsplan-backup.json","application/json");
+  });
+  qs("#fullDataImportForm").addEventListener("submit",async(e)=>{
+    e.preventDefault();
+    if(!navigator.onLine) return toast("Import benötigt eine Serververbindung");
+    if(!confirm("Aktuelle Personen, Einträge, Ferien und Feiertage durch dieses Backup ersetzen? Vorher wird automatisch ein Sicherheitsbackup erstellt.")) return;
+    const fd=new FormData(e.target);
+    try{
+      toast("Backup wird wiederhergestellt …");
+      const res=await fetch("/import-data.json",{method:"POST",body:fd});
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.error||"Import fehlgeschlagen");
+      await loadPeople(); await loadEntries(); await loadPeriods(); await loadConfig();
+      e.target.reset();
+      toast(`${data.people} Personen, ${data.entries} Einträge, ${data.periods} Zeiträume wiederhergestellt`);
+    }catch(err){toast(err.message);}
   });
 
   qs("#importForm").addEventListener("submit",async(e)=>{

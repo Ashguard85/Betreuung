@@ -195,3 +195,6 @@ body.modal-open{overflow:hidden}
 .month-option{min-height:40px;padding:7px 8px;font-size:13px}
 .month-option span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:390px){.year-month-grid{gap:6px}.month-option{font-size:12px;padding:6px;min-height:38px}.year-month-select{min-width:110px}}
+
+/* iCal subscriptions */
+.ical-title,.ical-section-label{font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 6px}.ical-person-list{display:flex;flex-direction:column;gap:10px}.ical-feed{border:1px solid var(--line);border-radius:14px;padding:10px;background:#fafbfa}.ical-feed-head{display:flex;align-items:center;gap:8px;margin-bottom:7px}.ical-feed-head .dot{width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.08);flex:0 0 auto}.pathbox.compact{padding:9px 10px;font-size:10px;max-height:64px}.link-button{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:inherit}.ical-feed .secondary{flex:1;min-height:40px}

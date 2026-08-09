@@ -20,6 +20,7 @@ Kleine iPhone-first PWA für einen einfachen Betreuungsplan.
 - Listenexport als CSV und echtes A4-PDF
 - Jahresübersicht als A4-Querformat über Drucken/PDF
 - optionale private iCal-URL für iPhone/Apple Kalender
+- zusätzlicher iCal-Feed pro Betreuungsperson mit eigenem abgeleiteten Token
 - Login per Container-Umgebungsvariable ein- oder ausschaltbar
 - SQLite-Datenbank in einem frei wählbaren Host-Pfad
 - nach jeder Änderung automatische konsistente SQLite-Sicherung
@@ -104,3 +105,14 @@ Die Jahresübersicht ist über **Drucken / PDF** für A4 Querformat optimiert. F
 ## Reverse Proxy / HTTPS
 
 Wenn die App übers Internet erreichbar ist, HTTPS verwenden. Bei `AUTH_ENABLED=false` hat jeder, der die App über Netzwerk/Reverse Proxy erreichen kann, vollen Zugriff auf die Betreuungsdaten. Deshalb den Zugriff über Firewall, VPN, Reverse-Proxy-Authentifizierung oder ein internes Netz begrenzen.
+
+## iCal / Cloudflare Access
+
+Der Endpunkt `/calendar.ics` liefert immer `Cache-Control: private, no-store` sowie zusätzliche No-Cache-Header aus. Wenn Cloudflare Access mit OTP eingesetzt wird, kann nur dieser exakte Pfad als Bypass freigegeben werden; der geheime Token wird weiterhin von der App geprüft.
+
+Im Setup werden zwei Arten von Links angezeigt:
+
+- **Gesamtkalender**: enthält alle Betreuungseinträge und verwendet den globalen `ICAL_TOKEN`. Diesen Link nicht weitergeben.
+- **Pro Person**: enthält nur die Termine dieser Person und verwendet einen aus `ICAL_TOKEN` abgeleiteten HMAC-Token. Ein Personen-Link kann deshalb nicht durch Ändern des `person`-Parameters für eine andere Person verwendet werden.
+
+Die Personen-Links verwenden weiterhin denselben Pfad `/calendar.ics`, daher reicht in Cloudflare Access eine einzige Bypass-Regel exakt für diesen Pfad. Wird eine Person umbenannt, muss ihr Personen-Kalender neu abonniert werden.

@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import threading
+from urllib.parse import urlencode
 from datetime import datetime, date, timedelta
 from functools import wraps
 from pathlib import Path
@@ -369,13 +370,56 @@ def entry_rows(where="", params=()):
         return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
+def person_ical_token(person_name):
+    """Derive a token that is valid only for one named person's feed."""
+    if not ICAL_TOKEN:
+        return ""
+    return hmac.new(
+        ICAL_TOKEN.encode("utf-8"),
+        ("person:" + person_name).encode("utf-8"),
+        digestmod="sha256",
+    ).hexdigest()
+
+
+def ical_feed_url(person_name=None):
+    base = request.url_root.rstrip("/") + "/calendar.ics"
+    if not ICAL_TOKEN:
+        return None
+    if person_name:
+        params = {"person": person_name, "token": person_ical_token(person_name)}
+    else:
+        params = {"token": ICAL_TOKEN}
+    return base + "?" + urlencode(params)
+
+
+@app.after_request
+def harden_calendar_response(response):
+    if request.path == "/calendar.ics":
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.get("/api/config")
 @login_required
 def api_config():
+    person_urls = []
+    if ICAL_TOKEN:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT name,color FROM people ORDER BY sort_order,name"
+            ).fetchall()
+        person_urls = [
+            {"name": r["name"], "color": r["color"], "url": ical_feed_url(r["name"])}
+            for r in rows
+        ]
     return jsonify({
         "title": APP_TITLE,
         "ical_enabled": bool(ICAL_TOKEN),
-        "ical_url": (request.url_root.rstrip("/") + "/calendar.ics?token=" + ICAL_TOKEN) if ICAL_TOKEN else None,
+        "ical_url": ical_feed_url() if ICAL_TOKEN else None,
+        "ical_person_urls": person_urls,
         "data_file": str(DB_PATH),
         "backup_dir": str(BACKUP_DIR),
         "auth_enabled": AUTH_ENABLED,
@@ -1516,19 +1560,40 @@ def import_data_json():
 
 @app.get("/calendar.ics")
 def calendar_ics():
-    if not ICAL_TOKEN or not hmac.compare_digest(request.args.get("token", ""), ICAL_TOKEN):
+    person = request.args.get("person", "").strip()
+    supplied_token = request.args.get("token", "")
+
+    if not ICAL_TOKEN:
         return Response("Not found", status=404)
 
-    person = request.args.get("person", "").strip()
-    rows = entry_rows("p.name = ?", (person,)) if person else entry_rows()
+    # The global token remains valid for the complete feed and for backwards
+    # compatibility. Person-specific links use a derived token, so sharing one
+    # person's URL does not grant access to other people's feeds.
+    valid_global = hmac.compare_digest(supplied_token, ICAL_TOKEN)
+    valid_person = bool(person) and hmac.compare_digest(
+        supplied_token, person_ical_token(person)
+    )
+    if not (valid_global or valid_person):
+        return Response("Not found", status=404)
+
+    if person:
+        rows = entry_rows("p.name = ?", (person,))
+        with db() as conn:
+            exists = conn.execute("SELECT 1 FROM people WHERE name = ?", (person,)).fetchone()
+        if not exists:
+            return Response("Not found", status=404)
+    else:
+        rows = entry_rows()
+
     host = request.host.split(":")[0]
+    calendar_name = f"{APP_TITLE} – {person}" if person else APP_TITLE
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//Betreuungsplan//DE",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{ics_escape(APP_TITLE)}",
+        f"X-WR-CALNAME:{ics_escape(calendar_name)}",
     ]
     for r in rows:
         d = r["day"].replace("-", "")

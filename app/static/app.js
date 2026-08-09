@@ -487,6 +487,32 @@ async function deletePeriod(id){
   catch(e){toast(e.message);}
 }
 
+function webcalUrl(url){
+  return String(url||"").replace(/^https?:/i,"webcal:");
+}
+async function copyCalendarUrl(url, label="Kalenderlink"){
+  try{
+    await navigator.clipboard.writeText(url);
+    toast(`${label} kopiert`);
+  }catch(_e){
+    toast("Link markieren und kopieren");
+  }
+}
+function renderPersonIcalFeeds(items=[]){
+  const box=qs("#icalPersonList");
+  if(!box) return;
+  if(!items.length){box.innerHTML="";return;}
+  box.innerHTML=`<div class="ical-section-label">Pro Person</div>`+items.map(item=>`
+    <div class="ical-feed">
+      <div class="ical-feed-head"><span class="dot" style="background:${esc(item.color||"#ececec")}"></span><b>${esc(item.name)}</b></div>
+      <div class="pathbox compact">${esc(item.url)}</div>
+      <div class="row topgap">
+        <button class="secondary ical-copy" type="button" data-url="${esc(item.url)}" data-name="${esc(item.name)}">Link kopieren</button>
+        <a class="secondary link-button" href="${esc(webcalUrl(item.url))}">Auf iPhone abonnieren</a>
+      </div>
+    </div>`).join("");
+  qsa(".ical-copy").forEach(btn=>btn.addEventListener("click",()=>copyCalendarUrl(btn.dataset.url,`${btn.dataset.name}-Link`)));
+}
 async function loadConfig(){
   const c=await api("/api/config");
   qs("#dataFile").textContent=c.data_file+"  |  Backups: "+c.backup_dir;
@@ -494,9 +520,16 @@ async function loadConfig(){
     qs("#icalBox").textContent=c.ical_url;
     qs("#copyIcal").style.display="";
     qs("#copyIcal").dataset.url=c.ical_url;
+    qs("#subscribeIcal").style.display="";
+    qs("#subscribeIcal").href=webcalUrl(c.ical_url);
+    qs("#icalSecurityHint").style.display="";
+    renderPersonIcalFeeds(c.ical_person_urls||[]);
   }else{
     qs("#icalBox").textContent="Nicht aktiviert. In Portainer ICAL_TOKEN setzen.";
     qs("#copyIcal").style.display="none";
+    qs("#subscribeIcal").style.display="none";
+    qs("#icalSecurityHint").style.display="none";
+    renderPersonIcalFeeds([]);
   }
 }
 
@@ -698,10 +731,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       qs("#newPerson").value="";await loadPeople();toast("Person hinzugefügt");
     }catch(e){toast(e.message);}
   });
-  qs("#copyIcal").addEventListener("click",async()=>{
-    try{await navigator.clipboard.writeText(qs("#copyIcal").dataset.url);toast("Kalenderlink kopiert");}
-    catch{toast("Link markieren und kopieren");}
-  });
+  qs("#copyIcal").addEventListener("click",()=>copyCalendarUrl(qs("#copyIcal").dataset.url));
   qs("#periodStart").value=isoToday();
   qs("#periodEnd").value=isoToday();
   syncDateShell(qs("#periodStart"));

@@ -169,9 +169,15 @@
 
       <div class="card">
         <h3>Kalender auf dem iPhone</h3>
-        <p class="small">Optionaler schreibgeschützter iCal-Abolink. Änderungen macht ihr weiterhin in dieser App.</p>
+        <p class="small">Schreibgeschützte iCal-Abos. Der Gesamtkalender enthält alle Einträge; die Personen-Kalender lassen sich auf dem iPhone separat abonnieren und einfärben.</p>
+        <div class="ical-title">Gesamtkalender</div>
         <div id="icalBox" class="pathbox">Nicht aktiviert.</div>
-        <button id="copyIcal" class="secondary topgap" style="display:none">Link kopieren</button>
+        <div class="row topgap">
+          <button id="copyIcal" class="secondary" style="display:none">Link kopieren</button>
+          <a id="subscribeIcal" class="secondary link-button" style="display:none">Auf iPhone abonnieren</a>
+        </div>
+        <div id="icalPersonList" class="ical-person-list topgap"></div>
+        <p id="icalSecurityHint" class="small topgap" style="display:none">Jeder Personen-Link hat einen eigenen abgeleiteten Token. Wer z. B. nur diesen Link erhält, kann den Parameter nicht einfach auf eine andere Person ändern.</p>
       </div>
 
       <div class="card">

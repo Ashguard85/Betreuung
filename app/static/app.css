@@ -158,3 +158,28 @@ body.modal-open{overflow:hidden}
   .batch-form-grid{column-gap:12px}
   .date-shell .date-display{font-size:15px;padding:0 7px}
 }
+
+
+/* Multi-select export picker, compact for iPhone 16 portrait. */
+.export-modalback{align-items:center;padding:max(10px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom))}
+.export-modal{width:min(430px,100%);max-height:calc(100dvh - 24px);overflow:hidden;padding:14px;border-radius:22px}
+.export-modal-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+.export-modal-head>div{flex:1;min-width:0}
+.export-modal-head h3{margin:0 0 3px;font-size:19px;line-height:1.15}
+.export-modal-head p{margin:0;line-height:1.25}
+.export-modal-head .close{flex:0 0 34px;width:34px;height:34px}
+.export-quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:9px}
+.export-quick-actions .secondary{min-height:40px;padding:8px}
+.export-person-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.export-person-option{display:flex;align-items:center;min-width:0;gap:7px;min-height:44px;border:1px solid var(--line);border-radius:12px;padding:8px 9px;background:#fff;font-size:14px;font-weight:700;line-height:1.1}
+.export-person-option input{width:20px;height:20px;min-width:20px;margin:0;accent-color:var(--accent)}
+.export-person-option .dot{flex:0 0 10px;width:10px;height:10px;margin:0}
+.export-person-option span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.export-apply{margin-top:10px;min-height:44px;padding:9px 12px}
+@media(max-width:430px){
+  .list-actions{gap:7px}
+  #listExportPeople{flex:1 1 100%;text-align:center}
+  .export-modal{padding:13px;border-radius:20px}
+  .export-person-grid{gap:7px}
+  .export-person-option{min-height:42px;padding:7px;font-size:13px}
+}

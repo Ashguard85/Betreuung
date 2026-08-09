@@ -774,15 +774,17 @@ def import_ics():
         backup_db("ics-import")
     return jsonify({"ok": True, "imported": imported, "skipped": skipped})
 
-def filtered_entry_rows(year="", person="", search=""):
+def filtered_entry_rows(year="", people=None, search=""):
+    people = [p for p in (people or []) if p]
     clauses = []
     params = []
     if year:
         clauses.append("e.day LIKE ?")
         params.append(f"{year}-%")
-    if person:
-        clauses.append("p.name = ?")
-        params.append(person)
+    if people:
+        placeholders = ",".join("?" for _ in people)
+        clauses.append(f"p.name IN ({placeholders})")
+        params.extend(people)
     if search:
         clauses.append("(LOWER(e.note) LIKE ? OR LOWER(p.name) LIKE ?)")
         needle = f"%{search.lower()}%"
@@ -790,14 +792,18 @@ def filtered_entry_rows(year="", person="", search=""):
     return entry_rows(" AND ".join(clauses), tuple(params)) if clauses else entry_rows()
 
 
-def export_filename(extension, year="", person=""):
-    safe_person = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "-" for c in person).strip("-")
+def export_filename(extension, year="", people=None):
+    people = [p for p in (people or []) if p]
     parts = ["betreuung"]
-    if safe_person:
-        parts.append(safe_person)
+    if len(people) == 1:
+        safe_person = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "-" for c in people[0]).strip("-")
+        if safe_person:
+            parts.append(safe_person)
+    elif len(people) > 1:
+        parts.append(f"auswahl-{len(people)}")
     if year:
         parts.append(year)
-    if not safe_person and not year:
+    if len(parts) == 1:
         parts.append("alle")
     return "-".join(parts) + extension
 
@@ -806,9 +812,9 @@ def export_filename(extension, year="", person=""):
 @login_required
 def export_csv():
     year = request.args.get("year", "").strip()
-    person = request.args.get("person", "").strip()
+    people = [p.strip() for p in request.args.getlist("person") if p.strip()]
     search = request.args.get("q", "").strip()
-    rows = filtered_entry_rows(year, person, search)
+    rows = filtered_entry_rows(year, people, search)
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
@@ -820,7 +826,7 @@ def export_csv():
     return Response(
         body,
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{export_filename(".csv", year, person)}"'},
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(".csv", year, people)}"'},
     )
 
 
@@ -828,9 +834,9 @@ def export_csv():
 @login_required
 def export_pdf():
     year = request.args.get("year", "").strip()
-    person = request.args.get("person", "").strip()
+    people = [p.strip() for p in request.args.getlist("person") if p.strip()]
     search = request.args.get("q", "").strip()
-    rows = filtered_entry_rows(year, person, search)
+    rows = filtered_entry_rows(year, people, search)
 
     output = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -840,7 +846,7 @@ def export_pdf():
         rightMargin=12 * mm,
         topMargin=14 * mm,
         bottomMargin=14 * mm,
-        title=f"Betreuungsliste {person or 'Alle'} {year}".strip(),
+        title=f"Betreuungsliste {', '.join(people) if people else 'Alle'} {year}".strip(),
         author=APP_TITLE,
     )
 
@@ -878,7 +884,12 @@ def export_pdf():
         textColor=colors.white,
     )
 
-    label = person or "Alle Betreuungspersonen"
+    if not people:
+        label = "Alle Betreuungspersonen"
+    elif len(people) <= 3:
+        label = ", ".join(people)
+    else:
+        label = f"{len(people)} ausgewählte Betreuungspersonen"
     if year:
         label += f" - {year}"
     if search:
@@ -941,7 +952,7 @@ def export_pdf():
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     pdf_bytes = output.getvalue()
     output.close()
-    filename = export_filename(".pdf", year, person)
+    filename = export_filename(".pdf", year, people)
     return Response(
         pdf_bytes,
         mimetype="application/pdf",

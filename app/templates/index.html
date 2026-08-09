@@ -71,6 +71,7 @@
       </div>
       <input id="filterSearch" class="input" placeholder="Suchen …"/>
       <div class="list-actions">
+        <button id="listExportPeople" class="secondary" type="button">Personen: Alle</button>
         <a id="listCsvLink" class="secondary linkbtn server-export" href="#">CSV</a>
         <a id="listPdfLink" class="secondary linkbtn server-export" href="#" target="_blank">PDF</a>
         <span id="listExportHint" class="small"></span>
@@ -219,6 +220,25 @@
   </div>
 </div>
 
+
+<div id="exportPeopleModalBack" class="modalback export-modalback" onclick="if(event.target===this)closeExportPeopleModal()">
+  <div class="modal export-modal" role="dialog" aria-modal="true" aria-labelledby="exportPeopleTitle">
+    <div class="export-modal-head">
+      <div>
+        <h3 id="exportPeopleTitle">Personen für Export</h3>
+        <p class="small">Mehrere Personen gemeinsam als CSV oder PDF exportieren.</p>
+      </div>
+      <button class="close" onclick="closeExportPeopleModal()" aria-label="Schliessen">✕</button>
+    </div>
+    <div class="export-quick-actions">
+      <button id="exportPeopleAll" class="secondary" type="button">Alle</button>
+      <button id="exportPeopleFilter" class="secondary" type="button">Listenfilter</button>
+    </div>
+    <div id="exportPeopleGrid" class="export-person-grid"></div>
+    <button id="exportPeopleApply" class="primary export-apply" type="button">Auswahl übernehmen</button>
+  </div>
+</div>
+
 <div id="batchModalBack" class="modalback batch-modalback" onclick="if(event.target===this)closeBatchModal()">
   <div class="modal batch-modal" role="dialog" aria-modal="true" aria-labelledby="batchModalTitle">
     <div class="batch-head">
@@ -274,6 +294,6 @@
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

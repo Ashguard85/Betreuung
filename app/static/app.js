@@ -5,6 +5,8 @@ let selectedQuick = null;
 let selectedModal = null;
 let selectedBatch = null;
 let batchPreviewKey = null;
+let exportPeople = [];
+let exportSelectionCustom = false;
 let editingId = null;
 let reloadingForServiceWorker = false;
 
@@ -128,6 +130,10 @@ function renderPersonFilter(){
   const current=qs("#filterPerson").value;
   qs("#filterPerson").innerHTML='<option value="">Alle</option>'+people.map(p=>`<option>${esc(p.name)}</option>`).join("");
   if(current) qs("#filterPerson").value=current;
+  if(exportSelectionCustom){
+    exportPeople=exportPeople.filter(name=>people.some(p=>p.name===name));
+    if(!exportPeople.length){ exportSelectionCustom=false; syncExportPeopleToListFilter(); }
+  } else syncExportPeopleToListFilter();
 }
 function showPage(name){
   qsa(".page").forEach(p=>p.classList.remove("active"));
@@ -152,6 +158,60 @@ function itemHtml(e){
     <button class="kebab">›</button>
   </div>`;
 }
+function syncExportPeopleToListFilter(){
+  const person=qs("#filterPerson")?.value || "";
+  exportPeople=person ? [person] : people.map(p=>p.name);
+}
+function exportPeopleAreAll(){
+  return people.length>0 && exportPeople.length===people.length && people.every(p=>exportPeople.includes(p.name));
+}
+function exportParams(){
+  const params=new URLSearchParams();
+  const year=qs("#filterYear").value;
+  const search=qs("#filterSearch").value.toLowerCase().trim();
+  if(year) params.set("year",year);
+  if(search) params.set("q",search);
+  if(!exportPeopleAreAll()) exportPeople.forEach(name=>params.append("person",name));
+  return params;
+}
+function updateExportControls(){
+  const params=exportParams();
+  qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
+  qs("#listPdfLink").href=`/export.pdf?${params.toString()}`;
+  const button=qs("#listExportPeople");
+  if(button){
+    if(exportPeopleAreAll()) button.textContent="Personen: Alle";
+    else if(exportPeople.length===1) button.textContent=`Person: ${exportPeople[0]}`;
+    else button.textContent=`Personen: ${exportPeople.length}`;
+  }
+}
+function openExportPeopleModal(){
+  const grid=qs("#exportPeopleGrid");
+  grid.innerHTML=people.map(p=>`<label class="export-person-option"><input type="checkbox" value="${esc(p.name)}" ${exportPeople.includes(p.name)?"checked":""}><span class="dot" style="background:${esc(p.color)}"></span><span>${esc(p.name)}</span></label>`).join("");
+  qs("#exportPeopleModalBack").classList.add("open");
+  document.body.classList.add("modal-open");
+}
+function closeExportPeopleModal(){
+  qs("#exportPeopleModalBack").classList.remove("open");
+  if(!qs("#modalBack")?.classList.contains("open")&&!qs("#batchModalBack")?.classList.contains("open")) document.body.classList.remove("modal-open");
+}
+function setExportPeopleChecks(mode){
+  const boxes=qsa('#exportPeopleGrid input[type="checkbox"]');
+  if(mode==="all") boxes.forEach(b=>b.checked=true);
+  if(mode==="filter"){
+    const person=qs("#filterPerson").value;
+    boxes.forEach(b=>b.checked=!person||b.value===person);
+  }
+}
+function applyExportPeopleSelection(){
+  const chosen=qsa('#exportPeopleGrid input[type="checkbox"]:checked').map(b=>b.value);
+  if(!chosen.length) return toast("Mindestens eine Person wählen");
+  exportPeople=chosen;
+  exportSelectionCustom=true;
+  closeExportPeopleModal();
+  updateExportControls();
+  toast(exportPeopleAreAll()?"Export: alle Personen":`Export: ${chosen.length} ausgewählt`);
+}
 function renderList(){
   const person=qs("#filterPerson").value;
   const year=qs("#filterYear").value;
@@ -162,15 +222,9 @@ function renderList(){
   arr.sort((a,b)=>a.day.localeCompare(b.day));
   qs("#fullList").innerHTML=arr.length?arr.map(itemHtml).join(""):'<div class="small">Keine Einträge.</div>';
 
-  const params=new URLSearchParams();
-  if(year) params.set("year",year);
-  if(person) params.set("person",person);
-  if(search) params.set("q",search);
-  qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
-  qs("#listPdfLink").href=`/export.pdf?${params.toString()}`;
-  qs("#listExportHint").textContent=person
-    ? `${arr.length} Einträge für ${person} im Jahr ${year}`
-    : `${arr.length} Einträge im Jahr ${year}`;
+  updateExportControls();
+  const exportLabel=exportPeopleAreAll()?"alle Personen":exportPeople.length===1?exportPeople[0]:`${exportPeople.length} Personen`;
+  qs("#listExportHint").textContent=`Export ${year}: ${exportLabel}`;
 }
 function renderStats(){
   const today=isoToday();
@@ -476,6 +530,10 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     }catch(e){toast(e.message);}
   });
   qs("#openBatch").addEventListener("click",openBatchModal);
+  qs("#listExportPeople").addEventListener("click",openExportPeopleModal);
+  qs("#exportPeopleAll").addEventListener("click",()=>setExportPeopleChecks("all"));
+  qs("#exportPeopleFilter").addEventListener("click",()=>setExportPeopleChecks("filter"));
+  qs("#exportPeopleApply").addEventListener("click",applyExportPeopleSelection);
   qs("#batchPreview").addEventListener("click",previewBatch);
   qs("#batchCreate").addEventListener("click",createBatch);
   qs("#batchPerson").addEventListener("change",()=>{selectedBatch=Number(qs("#batchPerson").value);resetBatchPreview();});
@@ -494,7 +552,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     try{await api(`/api/entries/${editingId}`,{method:"DELETE"});closeModal();await loadEntries();toast("Gelöscht");}
     catch(e){toast(e.message);}
   });
-  qs("#filterPerson").addEventListener("change",renderList);
+  qs("#filterPerson").addEventListener("change",()=>{ if(!exportSelectionCustom) syncExportPeopleToListFilter(); renderList(); });
   qs("#filterYear").addEventListener("change",renderList);
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});

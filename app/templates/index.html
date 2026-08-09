@@ -66,12 +66,11 @@
     </div>
     <div class="card">
       <div class="filters">
-        <select id="filterPerson" class="input"></select>
+        <button id="listExportPeople" class="secondary list-people-select" type="button">Personen: Alle</button>
         <select id="filterYear" class="input"></select>
       </div>
       <input id="filterSearch" class="input" placeholder="Suchen …"/>
       <div class="list-actions">
-        <button id="listExportPeople" class="secondary" type="button">Personen: Alle</button>
         <a id="listCsvLink" class="secondary linkbtn server-export" href="#">CSV</a>
         <a id="listPdfLink" class="secondary linkbtn server-export" href="#" target="_blank">PDF</a>
         <span id="listExportHint" class="small"></span>
@@ -225,14 +224,13 @@
   <div class="modal export-modal" role="dialog" aria-modal="true" aria-labelledby="exportPeopleTitle">
     <div class="export-modal-head">
       <div>
-        <h3 id="exportPeopleTitle">Personen für Export</h3>
-        <p class="small">Mehrere Personen gemeinsam als CSV oder PDF exportieren.</p>
+        <h3 id="exportPeopleTitle">Personen auswählen</h3>
+        <p class="small">Die Auswahl gilt für Liste, CSV und PDF.</p>
       </div>
       <button class="close" onclick="closeExportPeopleModal()" aria-label="Schliessen">✕</button>
     </div>
-    <div class="export-quick-actions">
-      <button id="exportPeopleAll" class="secondary" type="button">Alle</button>
-      <button id="exportPeopleFilter" class="secondary" type="button">Listenfilter</button>
+    <div class="export-quick-actions export-quick-actions-single">
+      <button id="exportPeopleAll" class="secondary" type="button">Alle Personen auswählen</button>
     </div>
     <div id="exportPeopleGrid" class="export-person-grid"></div>
     <button id="exportPeopleApply" class="primary export-apply" type="button">Auswahl übernehmen</button>

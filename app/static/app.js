@@ -6,7 +6,7 @@ let selectedModal = null;
 let selectedBatch = null;
 let batchPreviewKey = null;
 let exportPeople = [];
-let exportSelectionCustom = false;
+let exportPeopleAllSelected = true;
 let editingId = null;
 let reloadingForServiceWorker = false;
 
@@ -127,13 +127,17 @@ function yearOptions(select){
   select.innerHTML=years.map(y=>`<option ${y===now?"selected":""}>${y}</option>`).join("");
 }
 function renderPersonFilter(){
-  const current=qs("#filterPerson").value;
-  qs("#filterPerson").innerHTML='<option value="">Alle</option>'+people.map(p=>`<option>${esc(p.name)}</option>`).join("");
-  if(current) qs("#filterPerson").value=current;
-  if(exportSelectionCustom){
+  if(exportPeopleAllSelected || !exportPeople.length){
+    exportPeople=people.map(p=>p.name);
+    exportPeopleAllSelected=true;
+  }else{
     exportPeople=exportPeople.filter(name=>people.some(p=>p.name===name));
-    if(!exportPeople.length){ exportSelectionCustom=false; syncExportPeopleToListFilter(); }
-  } else syncExportPeopleToListFilter();
+    if(!exportPeople.length){
+      exportPeople=people.map(p=>p.name);
+      exportPeopleAllSelected=true;
+    }
+  }
+  updateExportControls();
 }
 function showPage(name){
   qsa(".page").forEach(p=>p.classList.remove("active"));
@@ -157,10 +161,6 @@ function itemHtml(e){
     <div class="note">${weekdayShort(d)}${e.note?" · "+esc(e.note):""}</div></div>
     <button class="kebab">›</button>
   </div>`;
-}
-function syncExportPeopleToListFilter(){
-  const person=qs("#filterPerson")?.value || "";
-  exportPeople=person ? [person] : people.map(p=>p.name);
 }
 function exportPeopleAreAll(){
   return people.length>0 && exportPeople.length===people.length && people.every(p=>exportPeople.includes(p.name));
@@ -198,33 +198,28 @@ function closeExportPeopleModal(){
 function setExportPeopleChecks(mode){
   const boxes=qsa('#exportPeopleGrid input[type="checkbox"]');
   if(mode==="all") boxes.forEach(b=>b.checked=true);
-  if(mode==="filter"){
-    const person=qs("#filterPerson").value;
-    boxes.forEach(b=>b.checked=!person||b.value===person);
-  }
 }
 function applyExportPeopleSelection(){
   const chosen=qsa('#exportPeopleGrid input[type="checkbox"]:checked').map(b=>b.value);
   if(!chosen.length) return toast("Mindestens eine Person wählen");
   exportPeople=chosen;
-  exportSelectionCustom=true;
+  exportPeopleAllSelected=exportPeopleAreAll();
   closeExportPeopleModal();
-  updateExportControls();
-  toast(exportPeopleAreAll()?"Export: alle Personen":`Export: ${chosen.length} ausgewählt`);
+  renderList();
+  toast(exportPeopleAreAll()?"Alle Personen ausgewählt":chosen.length===1?chosen[0]:`${chosen.length} Personen ausgewählt`);
 }
 function renderList(){
-  const person=qs("#filterPerson").value;
   const year=qs("#filterYear").value;
   const search=qs("#filterSearch").value.toLowerCase().trim();
   let arr=entries.filter(e=>e.day.startsWith(year));
-  if(person) arr=arr.filter(e=>e.person===person);
+  if(!exportPeopleAreAll()) arr=arr.filter(e=>exportPeople.includes(e.person));
   if(search) arr=arr.filter(e=>(e.note||"").toLowerCase().includes(search)||e.person.toLowerCase().includes(search));
   arr.sort((a,b)=>a.day.localeCompare(b.day));
   qs("#fullList").innerHTML=arr.length?arr.map(itemHtml).join(""):'<div class="small">Keine Einträge.</div>';
 
   updateExportControls();
   const exportLabel=exportPeopleAreAll()?"alle Personen":exportPeople.length===1?exportPeople[0]:`${exportPeople.length} Personen`;
-  qs("#listExportHint").textContent=`Export ${year}: ${exportLabel}`;
+  qs("#listExportHint").textContent=`${year} · ${exportLabel}`;
 }
 function renderStats(){
   const today=isoToday();
@@ -532,7 +527,6 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#openBatch").addEventListener("click",openBatchModal);
   qs("#listExportPeople").addEventListener("click",openExportPeopleModal);
   qs("#exportPeopleAll").addEventListener("click",()=>setExportPeopleChecks("all"));
-  qs("#exportPeopleFilter").addEventListener("click",()=>setExportPeopleChecks("filter"));
   qs("#exportPeopleApply").addEventListener("click",applyExportPeopleSelection);
   qs("#batchPreview").addEventListener("click",previewBatch);
   qs("#batchCreate").addEventListener("click",createBatch);
@@ -552,7 +546,6 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     try{await api(`/api/entries/${editingId}`,{method:"DELETE"});closeModal();await loadEntries();toast("Gelöscht");}
     catch(e){toast(e.message);}
   });
-  qs("#filterPerson").addEventListener("change",()=>{ if(!exportSelectionCustom) syncExportPeopleToListFilter(); renderList(); });
   qs("#filterYear").addEventListener("change",renderList);
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});

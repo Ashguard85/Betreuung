@@ -71,3 +71,47 @@ body.modal-open{overflow:hidden}
   .batch-preview{min-height:40px;padding:6px 8px}
   .batch-actions{margin-top:8px}
 }
+
+
+/* Compact native date fields — especially for iPhone/Safari. */
+input[type="date"].input{
+  width:min(100%,176px);
+  max-width:176px;
+  height:38px;
+  min-height:38px;
+  padding:5px 8px;
+  border-radius:10px;
+  font-size:16px;
+  line-height:20px;
+  color-scheme:light;
+}
+input[type="date"].input::-webkit-date-and-time-value{
+  min-height:0;
+  margin:0;
+  padding:0;
+  text-align:left;
+}
+input[type="date"].input::-webkit-datetime-edit{
+  padding:0;
+}
+input[type="date"].input::-webkit-calendar-picker-indicator{
+  margin:0;
+  padding:2px;
+}
+.batch-modal input[type="date"].input{
+  width:100%;
+  max-width:100%;
+  height:38px;
+  min-height:38px;
+  padding:5px 7px;
+  border-radius:10px;
+}
+@media(max-width:430px){
+  input[type="date"].input{
+    height:38px;
+    min-height:38px;
+    padding:4px 7px;
+    border-radius:10px;
+  }
+  #quickDate,#modalDate{max-width:168px}
+}

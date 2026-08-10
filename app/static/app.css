@@ -198,3 +198,30 @@ body.modal-open{overflow:hidden}
 
 /* iCal subscriptions */
 .ical-title,.ical-section-label{font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 6px}.ical-person-list{display:flex;flex-direction:column;gap:10px}.ical-feed{border:1px solid var(--line);border-radius:14px;padding:10px;background:#fafbfa}.ical-feed-head{display:flex;align-items:center;gap:8px;margin-bottom:7px}.ical-feed-head .dot{width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.08);flex:0 0 auto}.pathbox.compact{padding:9px 10px;font-size:10px;max-height:64px}.link-button{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:inherit}.ical-feed .secondary{flex:1;min-height:40px}
+
+/* v22: all-day / time-range controls */
+.timing-control{display:flex;flex-direction:column;gap:8px}
+.all-day-toggle{display:inline-flex;align-items:center;gap:9px;width:max-content;max-width:100%;font-size:13px;font-weight:700;color:var(--text);user-select:none}
+.all-day-toggle input{appearance:none;-webkit-appearance:none;width:42px;height:24px;border-radius:999px;background:#dfe4e1;position:relative;margin:0;flex:0 0 auto;transition:.18s}
+.all-day-toggle input::after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.18);transition:.18s}
+.all-day-toggle input:checked{background:var(--accent)}
+.all-day-toggle input:checked::after{transform:translateX(18px)}
+.time-range{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.time-range[hidden]{display:none!important}
+.time-range label{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:7px;min-width:0}
+.time-range label>span{font-size:11px;font-weight:700;color:var(--muted)}
+.time-input{min-width:0;height:42px;padding:8px 10px;text-align:center}
+.batch-timing-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.batch-timing-row .time-range{flex:1;max-width:270px}
+.all-day-toggle.compact{font-size:12px;flex:0 0 auto}
+.all-day-toggle.compact input{width:38px;height:22px}
+.all-day-toggle.compact input::after{width:16px;height:16px}
+.all-day-toggle.compact input:checked::after{transform:translateX(16px)}
+.time-range.compact{gap:7px}
+.time-range.compact label{gap:4px}
+.time-range.compact .time-input{height:38px;padding:6px 7px;font-size:15px}
+@media(max-width:430px){
+  .time-input{font-size:16px}
+  .batch-timing-row{gap:8px}
+  .batch-timing-row .time-range{max-width:none}
+}

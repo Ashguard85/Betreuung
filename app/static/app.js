@@ -69,6 +69,34 @@ function monthShort(d){ return d.toLocaleDateString("de-CH",{month:"short"}).rep
 function weekdayShort(d){ return d.toLocaleDateString("de-CH",{weekday:"short"}).replace(".",""); }
 function personById(id){ return people.find(p=>Number(p.id)===Number(id)); }
 function personColor(name){ return (people.find(p=>p.name===name)||{color:"#ececec"}).color; }
+function entryTimeLabel(e){
+  if(!e || Number(e.all_day)!==0) return "";
+  return e.start_time && e.end_time ? `${e.start_time}–${e.end_time}` : "";
+}
+function syncTiming(prefix){
+  const allDay=qs(`#${prefix}AllDay`);
+  const range=qs(`#${prefix}TimeRange`);
+  if(!allDay || !range) return;
+  range.hidden=allDay.checked;
+}
+function setTiming(prefix, entry=null){
+  const allDay=qs(`#${prefix}AllDay`);
+  const start=qs(`#${prefix}StartTime`);
+  const end=qs(`#${prefix}EndTime`);
+  if(!allDay || !start || !end) return;
+  allDay.checked=entry ? Number(entry.all_day)!==0 : true;
+  start.value=entry?.start_time || "";
+  end.value=entry?.end_time || "";
+  syncTiming(prefix);
+}
+function timingPayload(prefix){
+  const allDay=qs(`#${prefix}AllDay`)?.checked ?? true;
+  return {
+    all_day:allDay,
+    start_time:allDay ? "" : (qs(`#${prefix}StartTime`)?.value || ""),
+    end_time:allDay ? "" : (qs(`#${prefix}EndTime`)?.value || ""),
+  };
+}
 
 async function loadPeople(){
   people = await api("/api/people");
@@ -160,7 +188,7 @@ function itemHtml(e){
   return `<div class="item" onclick="openModal(${e.id})">
     <div class="datebox"><b>${d.getDate()}</b><span>${monthShort(d)}</span></div>
     <div><div class="who"><span class="dot" style="background:${esc(e.color)}"></span>${esc(e.person)}</div>
-    <div class="note">${weekdayShort(d)}${e.note?" · "+esc(e.note):""}</div></div>
+    <div class="note">${weekdayShort(d)}${entryTimeLabel(e)?" · "+esc(entryTimeLabel(e)):""}${e.note?" · "+esc(e.note):""}</div></div>
     <button class="kebab">›</button>
   </div>`;
 }
@@ -349,8 +377,10 @@ function openModal(id=null){
   qs("#modalDate").value=e?e.day:(qs("#quickDate").value||isoToday());
   syncDateShell(qs("#modalDate"));
   qs("#modalNote").value=e?e.note:"";
+  setTiming("modal",e);
   selectedModal=e?e.person_id:(people[0]?.id||null);
   renderPersonButtons("#modalPeople","modal");
+  qs("#modalShare").style.display=e?"block":"none";
   qs("#modalDelete").style.display=e?"block":"none";
   qs("#modalBack").classList.add("open");
 }
@@ -376,6 +406,7 @@ function batchPayload(){
     start_day:qs("#batchStart").value,
     end_day:qs("#batchEnd").value,
     note:qs("#batchNote").value.trim(),
+    ...timingPayload("batch"),
   };
 }
 function openBatchModal(){
@@ -389,6 +420,7 @@ function openBatchModal(){
   syncDateShell(qs("#batchEnd"));
   qs("#batchWeekday").value=String((now.getDay()+6)%7);
   qs("#batchNote").value="";
+  setTiming("batch");
   resetBatchPreview();
   qs("#batchModalBack").classList.add("open");
   document.body.classList.add("modal-open");
@@ -431,8 +463,8 @@ async function createBatch(){
 function toast(msg){
   const t=qs("#toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);
 }
-async function saveEntry(day,personId,note,id=null){
-  const payload={day,person_id:Number(personId),note};
+async function saveEntry(day,personId,note,timing,id=null){
+  const payload={day,person_id:Number(personId),note,...timing};
   if(id) await api(`/api/entries/${id}`,{method:"PUT",body:JSON.stringify(payload)});
   else await api("/api/entries",{method:"POST",body:JSON.stringify(payload)});
   await loadEntries();
@@ -583,10 +615,10 @@ async function shareServerPdf(url, fallbackName="betreuungsplan.pdf"){
   }
 }
 
-async function shareServerFile(url, fallbackName, mimeType){
-  if(!navigator.onLine){toast("Export benötigt eine Serververbindung");return;}
+async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wird erstellt …"){
+  if(!navigator.onLine){toast("Teilen benötigt eine Serververbindung");return;}
   try{
-    toast("Backup wird erstellt …");
+    toast(preparing);
     const response=await fetch(url,{credentials:"same-origin",cache:"no-store"});
     if(response.status===401){location.href="/login";return;}
     if(!response.ok) throw new Error(`Export fehlgeschlagen (HTTP ${response.status})`);
@@ -605,7 +637,7 @@ async function shareServerFile(url, fallbackName, mimeType){
     link.href=blobUrl; link.download=filename; link.rel="noopener";
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
-    toast("Backup exportiert");
+    toast("Datei bereit");
   }catch(error){console.error(error);toast(error.message || "Export fehlgeschlagen");}
 }
 
@@ -614,7 +646,7 @@ function applyOnlineState(){
   document.body.classList.toggle("is-offline",!online);
   const banner=qs("#offlineBanner");
   if(banner) banner.hidden=online;
-  ["#quickSave","#modalSave","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
+  ["#quickSave","#modalSave","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!online;
   });
   qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
@@ -676,11 +708,20 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   upgradeDateInputs();
   qs("#quickDate").value=isoToday();
   syncDateShell(qs("#quickDate"));
+  setTiming("quick");
+  ["quick","modal","batch"].forEach(prefix=>{
+    qs(`#${prefix}AllDay`)?.addEventListener("change",()=>{
+      syncTiming(prefix);
+      if(prefix==="batch") resetBatchPreview();
+    });
+    qs(`#${prefix}StartTime`)?.addEventListener("change",()=>{if(prefix==="batch")resetBatchPreview();});
+    qs(`#${prefix}EndTime`)?.addEventListener("change",()=>{if(prefix==="batch")resetBatchPreview();});
+  });
 
   qs("#quickSave").addEventListener("click",async()=>{
     try{
       if(!qs("#quickDate").value||!selectedQuick)return toast("Datum und Betreuung wählen");
-      await saveEntry(qs("#quickDate").value,selectedQuick,qs("#quickNote").value);
+      await saveEntry(qs("#quickDate").value,selectedQuick,qs("#quickNote").value,timingPayload("quick"));
       qs("#quickNote").value="";toast("Gespeichert");
     }catch(e){toast(e.message);}
   });
@@ -709,9 +750,15 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#modalSave").addEventListener("click",async()=>{
     try{
       if(!qs("#modalDate").value||!selectedModal)return toast("Datum und Betreuung wählen");
-      await saveEntry(qs("#modalDate").value,selectedModal,qs("#modalNote").value,editingId);
+      await saveEntry(qs("#modalDate").value,selectedModal,qs("#modalNote").value,timingPayload("modal"),editingId);
       closeModal();toast("Gespeichert");
     }catch(e){toast(e.message);}
+  });
+  qs("#modalShare").addEventListener("click",()=>{
+    if(!editingId) return;
+    const e=entries.find(x=>Number(x.id)===Number(editingId));
+    const fallback=e?`betreuung-${e.day}.ics`:`betreuung.ics`;
+    shareServerFile(`/api/entries/${editingId}/ics`,fallback,"text/calendar","Kalendereintrag wird erstellt …");
   });
   qs("#modalDelete").addEventListener("click",async()=>{
     if(!editingId||!confirm("Eintrag wirklich löschen?"))return;

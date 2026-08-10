@@ -116,3 +116,14 @@ Im Setup werden zwei Arten von Links angezeigt:
 - **Pro Person**: enthält nur die Termine dieser Person und verwendet einen aus `ICAL_TOKEN` abgeleiteten HMAC-Token. Ein Personen-Link kann deshalb nicht durch Ändern des `person`-Parameters für eine andere Person verwendet werden.
 
 Die Personen-Links verwenden weiterhin denselben Pfad `/calendar.ics`, daher reicht in Cloudflare Access eine einzige Bypass-Regel exakt für diesen Pfad. Wird eine Person umbenannt, muss ihr Personen-Kalender neu abonniert werden.
+
+## Neu in v22 – Uhrzeiten & Termin teilen
+
+- Betreuungseinträge können **ganztägig** oder mit **Von/Bis-Uhrzeit** gespeichert werden.
+- Bestehende Datenbanken werden beim Start automatisch erweitert; vorhandene Einträge bleiben ganztägig.
+- Die Zeitangaben werden im Gesamt-iCal und in den Personen-iCal-Feeds ausgegeben.
+- In der Bearbeitungsmaske gibt es **„Termin teilen (.ics)“**. Auf iPhone/iPad öffnet die PWA über die Web Share API den nativen Teilen-Dialog; dort kann z. B. WhatsApp gewählt werden.
+- CSV, PDF-Liste und vollständiges JSON-Backup enthalten die Zeitinformationen ebenfalls.
+- Der Jahresplan bleibt bewusst kompakt und zeigt weiterhin primär die Betreuungsperson pro Tag.
+
+Hinweis: Zeitangaben im iCal werden aktuell als lokale („floating“) Uhrzeiten ohne feste Zeitzone ausgegeben. Das passt für eine lokale Familienplanung; eine explizite Zeitzonenbehandlung kann bei Bedarf ergänzt werden.

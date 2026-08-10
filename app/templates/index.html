@@ -43,6 +43,14 @@
         <label class="label">Datum</label>
         <input id="quickDate" class="input" type="date"/>
         <div class="space"></div>
+        <div class="timing-control">
+          <label class="all-day-toggle"><input id="quickAllDay" type="checkbox" checked><span>Ganztägig</span></label>
+          <div id="quickTimeRange" class="time-range" hidden>
+            <label><span>Von</span><input id="quickStartTime" class="input time-input" type="time"></label>
+            <label><span>Bis</span><input id="quickEndTime" class="input time-input" type="time"></label>
+          </div>
+        </div>
+        <div class="space"></div>
         <label class="label">Betreuung</label>
         <div class="person-grid" id="quickPeople"></div>
         <div class="space"></div>
@@ -224,6 +232,14 @@
     <label class="label">Datum</label>
     <input id="modalDate" class="input" type="date"/>
     <div class="space"></div>
+    <div class="timing-control">
+      <label class="all-day-toggle"><input id="modalAllDay" type="checkbox" checked><span>Ganztägig</span></label>
+      <div id="modalTimeRange" class="time-range" hidden>
+        <label><span>Von</span><input id="modalStartTime" class="input time-input" type="time"></label>
+        <label><span>Bis</span><input id="modalEndTime" class="input time-input" type="time"></label>
+      </div>
+    </div>
+    <div class="space"></div>
     <label class="label">Betreuung</label>
     <div class="person-grid" id="modalPeople"></div>
     <div class="space"></div>
@@ -231,6 +247,7 @@
     <textarea id="modalNote" class="input" placeholder="Optional"></textarea>
     <div class="space"></div>
     <button class="primary" id="modalSave">Speichern</button>
+    <button class="secondary full topgap" id="modalShare" style="display:none">Termin teilen (.ics)</button>
     <button class="secondary danger full topgap" id="modalDelete" style="display:none">Eintrag löschen</button>
   </div>
 </div>
@@ -309,6 +326,16 @@
         <input id="batchEnd" class="input" type="date">
       </div>
 
+      <div class="batch-field batch-field-wide batch-timing-field">
+        <div class="batch-timing-row">
+          <label class="all-day-toggle compact"><input id="batchAllDay" type="checkbox" checked><span>Ganztägig</span></label>
+          <div id="batchTimeRange" class="time-range compact" hidden>
+            <label><span>Von</span><input id="batchStartTime" class="input time-input" type="time"></label>
+            <label><span>Bis</span><input id="batchEndTime" class="input time-input" type="time"></label>
+          </div>
+        </div>
+      </div>
+
       <div class="batch-field batch-field-wide">
         <label class="label" for="batchNote">Bemerkung <span class="small">(optional)</span></label>
         <input id="batchNote" class="input" placeholder="z. B. reguläre Kita">
@@ -325,6 +352,6 @@
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=22"></script>
 </body>
 </html>

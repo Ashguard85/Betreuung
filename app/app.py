@@ -173,6 +173,9 @@ def init_db():
           day TEXT NOT NULL UNIQUE,
           person_id INTEGER NOT NULL,
           note TEXT NOT NULL DEFAULT '',
+          all_day INTEGER NOT NULL DEFAULT 1,
+          start_time TEXT NOT NULL DEFAULT '',
+          end_time TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE RESTRICT
@@ -195,6 +198,15 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_periods_range ON periods(start_day, end_day);
         """)
+        # Backwards-compatible migration for databases created before timed entries existed.
+        entry_columns = {r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
+        if "all_day" not in entry_columns:
+            conn.execute("ALTER TABLE entries ADD COLUMN all_day INTEGER NOT NULL DEFAULT 1")
+        if "start_time" not in entry_columns:
+            conn.execute("ALTER TABLE entries ADD COLUMN start_time TEXT NOT NULL DEFAULT ''")
+        if "end_time" not in entry_columns:
+            conn.execute("ALTER TABLE entries ADD COLUMN end_time TEXT NOT NULL DEFAULT ''")
+
         existing = conn.execute("SELECT COUNT(*) AS c FROM people").fetchone()["c"]
         if existing == 0:
             conn.executemany(
@@ -356,9 +368,36 @@ def valid_iso_day(value):
         return None
 
 
+def valid_hhmm(value):
+    value = str(value or "").strip()
+    try:
+        return datetime.strptime(value, "%H:%M").strftime("%H:%M")
+    except Exception:
+        return None
+
+
+def normalize_entry_timing(payload):
+    raw_all_day = payload.get("all_day", True)
+    if isinstance(raw_all_day, str):
+        all_day = raw_all_day.strip().lower() not in {"0", "false", "no", "off"}
+    else:
+        all_day = bool(raw_all_day)
+    if all_day:
+        return 1, "", "", None
+
+    start_time = valid_hhmm(payload.get("start_time"))
+    end_time = valid_hhmm(payload.get("end_time"))
+    if not start_time or not end_time:
+        return None, None, None, "Von und Bis sind bei einem Termin mit Uhrzeit erforderlich"
+    if end_time <= start_time:
+        return None, None, None, "Bis muss nach Von liegen"
+    return 0, start_time, end_time, None
+
+
 def entry_rows(where="", params=()):
     query = """
-      SELECT e.id, e.day, e.note, e.created_at, e.updated_at,
+      SELECT e.id, e.day, e.note, e.all_day, e.start_time, e.end_time,
+             e.created_at, e.updated_at,
              p.id AS person_id, p.name AS person, p.color AS color
       FROM entries e
       JOIN people p ON p.id = e.person_id
@@ -517,8 +556,11 @@ def api_entries_add():
     day = valid_iso_day(str(payload.get("day", "")))
     person_id = payload.get("person_id")
     note = str(payload.get("note", "")).strip()
+    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload)
     if not day or not person_id:
         return jsonify({"error": "Datum und Betreuung sind erforderlich"}), 400
+    if timing_error:
+        return jsonify({"error": timing_error}), 400
 
     now = datetime.now().isoformat(timespec="seconds")
     try:
@@ -526,16 +568,16 @@ def api_entries_add():
             existing = conn.execute("SELECT id FROM entries WHERE day=?", (day,)).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE entries SET person_id=?,note=?,updated_at=? WHERE id=?",
-                    (person_id, note, now, existing["id"]),
+                    "UPDATE entries SET person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=? WHERE id=?",
+                    (person_id, note, all_day, start_time, end_time, now, existing["id"]),
                 )
                 entry_id = existing["id"]
                 status = 200
             else:
                 cur = conn.execute(
-                    """INSERT INTO entries(day,person_id,note,created_at,updated_at)
-                       VALUES(?,?,?,?,?)""",
-                    (day, person_id, note, now, now),
+                    """INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (day, person_id, note, all_day, start_time, end_time, now, now),
                 )
                 entry_id = cur.lastrowid
                 status = 201
@@ -552,16 +594,19 @@ def api_entries_update(entry_id):
     day = valid_iso_day(str(payload.get("day", "")))
     person_id = payload.get("person_id")
     note = str(payload.get("note", "")).strip()
+    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload)
     if not day or not person_id:
         return jsonify({"error": "Datum und Betreuung sind erforderlich"}), 400
+    if timing_error:
+        return jsonify({"error": timing_error}), 400
 
     try:
         with db() as conn:
             conn.execute(
                 """UPDATE entries
-                   SET day=?,person_id=?,note=?,updated_at=?
+                   SET day=?,person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=?
                    WHERE id=?""",
-                (day, person_id, note, datetime.now().isoformat(timespec="seconds"), entry_id),
+                (day, person_id, note, all_day, start_time, end_time, datetime.now().isoformat(timespec="seconds"), entry_id),
             )
         backup_db("entry-update")
         return jsonify({"ok": True})
@@ -584,6 +629,9 @@ def parse_batch_payload():
     end_day = valid_iso_day(str(payload.get("end_day", "")))
     person_id = payload.get("person_id")
     note = str(payload.get("note", "")).strip()
+    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload)
+    if timing_error:
+        return None, timing_error
 
     try:
         person_id = int(person_id)
@@ -624,6 +672,9 @@ def parse_batch_payload():
         "person_id": person_id,
         "person": dict(person),
         "note": note,
+        "all_day": all_day,
+        "start_time": start_time,
+        "end_time": end_time,
         "days": days,
     }, None
 
@@ -682,9 +733,9 @@ def api_entries_batch_create():
     with db() as conn:
         for day in batch["days"]:
             cur = conn.execute(
-                """INSERT OR IGNORE INTO entries(day,person_id,note,created_at,updated_at)
-                   VALUES(?,?,?,?,?)""",
-                (day, batch["person_id"], batch["note"], now, now),
+                """INSERT OR IGNORE INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (day, batch["person_id"], batch["note"], batch["all_day"], batch["start_time"], batch["end_time"], now, now),
             )
             if cur.rowcount == 1:
                 created += 1
@@ -993,9 +1044,9 @@ def export_csv():
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Datum", "Betreuung", "Bemerkung"])
+    w.writerow(["Datum", "Betreuung", "Ganztägig", "Von", "Bis", "Bemerkung"])
     for r in rows:
-        w.writerow([r["day"], r["person"], r["note"]])
+        w.writerow([r["day"], r["person"], "Ja" if r["all_day"] else "Nein", r["start_time"], r["end_time"], r["note"]])
 
     body = "\ufeff" + buf.getvalue()
     return Response(
@@ -1079,6 +1130,7 @@ def export_pdf():
         Paragraph("Datum", header_style),
         Paragraph("Tag", header_style),
         Paragraph("Betreuung", header_style),
+        Paragraph("Zeit", header_style),
         Paragraph("Bemerkung", header_style),
     ]]
     weekdays = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -1089,6 +1141,7 @@ def export_pdf():
             Paragraph(day_obj.strftime("%d.%m.%Y"), cell_style),
             Paragraph(weekdays[day_obj.weekday()], cell_style),
             Paragraph(xml_escape(r["person"]), cell_style),
+            Paragraph("Ganztägig" if r["all_day"] else f"{r['start_time']}–{r['end_time']}", cell_style),
             Paragraph(xml_escape(r["note"] or ""), cell_style),
         ])
         try:
@@ -1098,7 +1151,7 @@ def export_pdf():
 
     table = Table(
         data,
-        colWidths=[29 * mm, 18 * mm, 43 * mm, 96 * mm],
+        colWidths=[27 * mm, 14 * mm, 38 * mm, 28 * mm, 79 * mm],
         repeatRows=1,
         hAlign="LEFT",
     )
@@ -1368,6 +1421,17 @@ def import_csv():
             day = valid_iso_day((row.get("Datum") or row.get("date") or row.get("day") or "").strip())
             person_name = (row.get("Betreuung") or row.get("person") or "").strip()
             note = (row.get("Bemerkung") or row.get("note") or "").strip()
+            raw_all_day = (row.get("Ganztägig") or row.get("all_day") or "").strip().lower()
+            start_time = valid_hhmm(row.get("Von") or row.get("start_time")) or ""
+            end_time = valid_hhmm(row.get("Bis") or row.get("end_time")) or ""
+            if raw_all_day:
+                all_day = 0 if raw_all_day in {"nein", "no", "0", "false", "off"} else 1
+            else:
+                all_day = 0 if start_time and end_time else 1
+            if not all_day and (not start_time or not end_time or end_time <= start_time):
+                continue
+            if all_day:
+                start_time = end_time = ""
             if not day or not person_name:
                 continue
             person_id = people.get(person_name)
@@ -1379,13 +1443,16 @@ def import_csv():
                 person_id = cur.lastrowid
                 people[person_name] = person_id
             conn.execute(
-                """INSERT INTO entries(day,person_id,note,created_at,updated_at)
-                   VALUES(?,?,?,?,?)
+                """INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?)
                    ON CONFLICT(day) DO UPDATE SET
                      person_id=excluded.person_id,
                      note=excluded.note,
+                     all_day=excluded.all_day,
+                     start_time=excluded.start_time,
+                     end_time=excluded.end_time,
                      updated_at=excluded.updated_at""",
-                (day, person_id, note, now, now),
+                (day, person_id, note, all_day, start_time, end_time, now, now),
             )
             imported += 1
     backup_db("import")
@@ -1411,7 +1478,7 @@ def export_data_json():
             "SELECT name,color,sort_order FROM people ORDER BY sort_order,name"
         ).fetchall()]
         entries = [dict(r) for r in conn.execute(
-            """SELECT e.day,p.name AS person,e.note,e.created_at,e.updated_at
+            """SELECT e.day,p.name AS person,e.note,e.all_day,e.start_time,e.end_time,e.created_at,e.updated_at
                FROM entries e JOIN people p ON p.id=e.person_id
                ORDER BY e.day"""
         ).fetchall()]
@@ -1493,8 +1560,16 @@ def import_data_json():
             return jsonify({"error": f"Ungültiger Betreuungseintrag an Position {idx + 1}"}), 400
         seen_days.add(day)
         now = datetime.now().isoformat(timespec="seconds")
+        timing_payload = {
+            "all_day": item.get("all_day", True),
+            "start_time": item.get("start_time", ""),
+            "end_time": item.get("end_time", ""),
+        }
+        all_day, start_time, end_time, timing_error = normalize_entry_timing(timing_payload)
+        if timing_error:
+            return jsonify({"error": f"Ungültige Zeit an Betreuungseintrag {idx + 1}: {timing_error}"}), 400
         normalized_entries.append((
-            day, person, str(item.get("note", "")),
+            day, person, str(item.get("note", "")), all_day, start_time, end_time,
             str(item.get("created_at") or now), str(item.get("updated_at") or now),
         ))
 
@@ -1536,10 +1611,10 @@ def import_data_json():
             )
             person_ids = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM people").fetchall()}
             conn.executemany(
-                """INSERT INTO entries(day,person_id,note,created_at,updated_at)
-                   VALUES(?,?,?,?,?)""",
-                [(day, person_ids[person], note, created_at, updated_at)
-                 for day, person, note, created_at, updated_at in normalized_entries],
+                """INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                [(day, person_ids[person], note, all_day, start_time, end_time, created_at, updated_at)
+                 for day, person, note, all_day, start_time, end_time, created_at, updated_at in normalized_entries],
             )
             conn.executemany(
                 """INSERT INTO periods(start_day,end_day,kind,label,color,source,external_uid,created_at,updated_at)
@@ -1556,6 +1631,73 @@ def import_data_json():
         "entries": len(normalized_entries),
         "periods": len(normalized_periods),
     })
+
+
+def entry_ics_event_lines(r, host):
+    day_compact = r["day"].replace("-", "")
+    dtstamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:betreuung-{r['id']}@{host}",
+        f"DTSTAMP:{dtstamp}",
+    ]
+    if r.get("all_day", 1):
+        next_day = (date.fromisoformat(r["day"]) + timedelta(days=1)).strftime("%Y%m%d")
+        lines.extend([
+            f"DTSTART;VALUE=DATE:{day_compact}",
+            f"DTEND;VALUE=DATE:{next_day}",
+        ])
+    else:
+        start_compact = str(r.get("start_time") or "").replace(":", "")
+        end_compact = str(r.get("end_time") or "").replace(":", "")
+        lines.extend([
+            f"DTSTART:{day_compact}T{start_compact}00",
+            f"DTEND:{day_compact}T{end_compact}00",
+        ])
+    lines.extend([
+        f"SUMMARY:{ics_escape(r['person'])}",
+        f"DESCRIPTION:{ics_escape(r['note'])}",
+        "CATEGORIES:Betreuung",
+        "STATUS:CONFIRMED",
+        "TRANSP:OPAQUE",
+        "END:VEVENT",
+    ])
+    return lines
+
+
+def build_ics_calendar(rows, host, calendar_name):
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Betreuungsplan//DE",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{ics_escape(calendar_name)}",
+    ]
+    for row in rows:
+        lines.extend(entry_ics_event_lines(row, host))
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
+@app.get("/api/entries/<int:entry_id>/ics")
+@login_required
+def entry_ics_export(entry_id):
+    rows = entry_rows("e.id = ?", (entry_id,))
+    if not rows:
+        return Response("Not found", status=404)
+    row = rows[0]
+    host = request.host.split(":")[0]
+    body = build_ics_calendar([row], host, f"{APP_TITLE} – {row['person']}")
+    filename = f"betreuung-{row['day']}-{entry_id}.ics"
+    return Response(
+        body,
+        mimetype="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store, max-age=0",
+        },
+    )
 
 
 @app.get("/calendar.ics")
@@ -1587,28 +1729,7 @@ def calendar_ics():
 
     host = request.host.split(":")[0]
     calendar_name = f"{APP_TITLE} – {person}" if person else APP_TITLE
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Betreuungsplan//DE",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{ics_escape(calendar_name)}",
-    ]
-    for r in rows:
-        d = r["day"].replace("-", "")
-        dtstamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-        lines.extend([
-            "BEGIN:VEVENT",
-            f"UID:betreuung-{r['id']}@{host}",
-            f"DTSTAMP:{dtstamp}",
-            f"DTSTART;VALUE=DATE:{d}",
-            f"SUMMARY:{ics_escape(r['person'])}",
-            f"DESCRIPTION:{ics_escape(r['note'])}",
-            "END:VEVENT",
-        ])
-    lines.append("END:VCALENDAR")
-    body = "\r\n".join(lines) + "\r\n"
+    body = build_ics_calendar(rows, host, calendar_name)
     return Response(body, mimetype="text/calendar; charset=utf-8")
 
 

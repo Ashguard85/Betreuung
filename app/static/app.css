@@ -225,3 +225,34 @@ body.modal-open{overflow:hidden}
   .batch-timing-row{gap:8px}
   .batch-timing-row .time-range{max-width:none}
 }
+
+/* v23: cleaner iPhone time range layout */
+.time-range:not(.compact) label{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:6px;
+  min-width:0;
+}
+.time-range:not(.compact) label>span{
+  display:block;
+  margin-left:2px;
+  font-size:12px;
+  line-height:1.2;
+  font-weight:700;
+  color:var(--muted);
+}
+.time-range:not(.compact) .time-input{
+  display:block;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  height:48px;
+  box-sizing:border-box;
+  padding:8px 12px;
+  text-align:center;
+}
+@media(max-width:430px){
+  .time-range:not(.compact){gap:10px}
+  .time-range:not(.compact) .time-input{height:48px;font-size:17px}
+}

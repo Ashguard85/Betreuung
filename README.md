@@ -127,3 +127,6 @@ Die Personen-Links verwenden weiterhin denselben Pfad `/calendar.ics`, daher rei
 - Der Jahresplan bleibt bewusst kompakt und zeigt weiterhin primär die Betreuungsperson pro Tag.
 
 Hinweis: Zeitangaben im iCal werden aktuell als lokale („floating“) Uhrzeiten ohne feste Zeitzone ausgegeben. Das passt für eine lokale Familienplanung; eine explizite Zeitzonenbehandlung kann bei Bedarf ergänzt werden.
+
+## v23 – Zeitfelder
+- Von/Bis auf iPhone als sauberes Zwei-Spalten-Layout mit Beschriftungen oberhalb der Zeitfelder.

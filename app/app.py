@@ -389,8 +389,11 @@ def normalize_entry_timing(payload):
     end_time = valid_hhmm(payload.get("end_time"))
     if not start_time or not end_time:
         return None, None, None, "Von und Bis sind bei einem Termin mit Uhrzeit erforderlich"
-    if end_time <= start_time:
-        return None, None, None, "Bis muss nach Von liegen"
+    if end_time == start_time:
+        return None, None, None, "Von und Bis dürfen nicht gleich sein"
+    # If the end time is earlier than the start time, the appointment ends
+    # on the following day (e.g. 22:00–05:00). This keeps the data model
+    # simple while still supporting overnight care.
     return 0, start_time, end_time, None
 
 
@@ -1141,7 +1144,11 @@ def export_pdf():
             Paragraph(day_obj.strftime("%d.%m.%Y"), cell_style),
             Paragraph(weekdays[day_obj.weekday()], cell_style),
             Paragraph(xml_escape(r["person"]), cell_style),
-            Paragraph("Ganztägig" if r["all_day"] else f"{r['start_time']}–{r['end_time']}", cell_style),
+            Paragraph(
+                "Ganztägig" if r["all_day"] else
+                f"{r['start_time']}–{r['end_time']}{' (+1)' if r['end_time'] < r['start_time'] else ''}",
+                cell_style
+            ),
             Paragraph(xml_escape(r["note"] or ""), cell_style),
         ])
         try:
@@ -1428,7 +1435,7 @@ def import_csv():
                 all_day = 0 if raw_all_day in {"nein", "no", "0", "false", "off"} else 1
             else:
                 all_day = 0 if start_time and end_time else 1
-            if not all_day and (not start_time or not end_time or end_time <= start_time):
+            if not all_day and (not start_time or not end_time or end_time == start_time):
                 continue
             if all_day:
                 start_time = end_time = ""
@@ -1650,9 +1657,13 @@ def entry_ics_event_lines(r, host):
     else:
         start_compact = str(r.get("start_time") or "").replace(":", "")
         end_compact = str(r.get("end_time") or "").replace(":", "")
+        end_day = date.fromisoformat(r["day"])
+        if str(r.get("end_time") or "") < str(r.get("start_time") or ""):
+            end_day += timedelta(days=1)
+        end_day_compact = end_day.strftime("%Y%m%d")
         lines.extend([
             f"DTSTART:{day_compact}T{start_compact}00",
-            f"DTEND:{day_compact}T{end_compact}00",
+            f"DTEND:{end_day_compact}T{end_compact}00",
         ])
     lines.extend([
         f"SUMMARY:{ics_escape(r['person'])}",

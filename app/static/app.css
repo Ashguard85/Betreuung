@@ -256,3 +256,92 @@ body.modal-open{overflow:hidden}
   .time-range:not(.compact){gap:10px}
   .time-range:not(.compact) .time-input{height:48px;font-size:17px}
 }
+
+/* v24: compact iPhone-safe time controls. Native picker is an invisible overlay,
+   so Safari cannot force an oversized intrinsic width. */
+.time-range{
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  width:100%;
+  max-width:100%;
+  gap:8px;
+}
+.time-range label{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+}
+.time-shell{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  height:40px;
+  min-height:40px;
+  overflow:hidden;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:12px;
+  box-sizing:border-box;
+}
+.time-shell:focus-within{
+  border-color:#9ab7af;
+  box-shadow:0 0 0 3px #eaf3f0;
+}
+.time-shell .time-display{
+  display:block;
+  width:100%;
+  min-width:0;
+  padding:0 6px;
+  text-align:center;
+  font-size:16px;
+  line-height:1;
+  font-variant-numeric:tabular-nums;
+  color:var(--text);
+  white-space:nowrap;
+  pointer-events:none;
+}
+.time-shell .time-native{
+  position:absolute!important;
+  inset:0!important;
+  z-index:2;
+  display:block!important;
+  width:100%!important;
+  max-width:none!important;
+  min-width:0!important;
+  height:100%!important;
+  min-height:0!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  opacity:.001;
+  background:transparent!important;
+  box-shadow:none!important;
+  -webkit-appearance:none;
+  appearance:none;
+  color:transparent!important;
+  font-size:16px!important;
+  line-height:1!important;
+}
+.time-shell .time-native::-webkit-date-and-time-value,
+.time-shell .time-native::-webkit-datetime-edit,
+.time-shell .time-native::-webkit-calendar-picker-indicator{opacity:0}
+.time-range:not(.compact) .time-input,
+.time-range.compact .time-input{height:100%!important;padding:0!important}
+.time-range.compact{gap:6px}
+.time-range.compact .time-shell{height:36px;min-height:36px;border-radius:10px}
+.time-range.compact .time-display{font-size:14px;padding:0 4px}
+.time-range.overnight label:last-child>span::after{
+  content:" · Folgetag";
+  color:var(--accent);
+  font-weight:800;
+}
+@media(max-width:430px){
+  .time-range:not(.compact){gap:8px}
+  .time-range:not(.compact) .time-shell{height:40px;min-height:40px}
+  .time-range:not(.compact) .time-display{font-size:16px}
+}

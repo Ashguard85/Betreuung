@@ -65,19 +65,57 @@ function upgradeDateInputs(){
     syncDateShell(input);
   });
 }
+function formatTimeValue(value){
+  return /^\d{2}:\d{2}$/.test(String(value||"")) ? String(value) : "--:--";
+}
+function timingPrefixFromInput(input){
+  return String(input?.id||"").replace(/(?:Start|End)Time$/,"");
+}
+function syncTimeShell(input){
+  const shell=input?.closest?.(".time-shell");
+  const display=shell?.querySelector(".time-display");
+  if(display) display.textContent=formatTimeValue(input.value);
+  const prefix=timingPrefixFromInput(input);
+  if(prefix) syncOvernight(prefix);
+}
+function upgradeTimeInputs(){
+  qsa('input[type="time"].time-input').forEach(input=>{
+    if(input.closest(".time-shell")){ syncTimeShell(input); return; }
+    const shell=document.createElement("div");
+    shell.className="time-shell";
+    input.parentNode.insertBefore(shell,input);
+    shell.appendChild(input);
+    input.classList.add("time-native");
+    const display=document.createElement("span");
+    display.className="time-display";
+    shell.appendChild(display);
+    input.addEventListener("input",()=>syncTimeShell(input));
+    input.addEventListener("change",()=>syncTimeShell(input));
+    syncTimeShell(input);
+  });
+}
 function monthShort(d){ return d.toLocaleDateString("de-CH",{month:"short"}).replace(".",""); }
 function weekdayShort(d){ return d.toLocaleDateString("de-CH",{weekday:"short"}).replace(".",""); }
 function personById(id){ return people.find(p=>Number(p.id)===Number(id)); }
 function personColor(name){ return (people.find(p=>p.name===name)||{color:"#ececec"}).color; }
 function entryTimeLabel(e){
   if(!e || Number(e.all_day)!==0) return "";
-  return e.start_time && e.end_time ? `${e.start_time}–${e.end_time}` : "";
+  if(!e.start_time || !e.end_time) return "";
+  const overnight=e.end_time < e.start_time;
+  return `${e.start_time}–${e.end_time}${overnight?" (+1)":""}`;
+}
+function syncOvernight(prefix){
+  const range=qs(`#${prefix}TimeRange`);
+  const start=qs(`#${prefix}StartTime`)?.value || "";
+  const end=qs(`#${prefix}EndTime`)?.value || "";
+  range?.classList.toggle("overnight",Boolean(start && end && end < start));
 }
 function syncTiming(prefix){
   const allDay=qs(`#${prefix}AllDay`);
   const range=qs(`#${prefix}TimeRange`);
   if(!allDay || !range) return;
   range.hidden=allDay.checked;
+  syncOvernight(prefix);
 }
 function setTiming(prefix, entry=null){
   const allDay=qs(`#${prefix}AllDay`);
@@ -87,6 +125,8 @@ function setTiming(prefix, entry=null){
   allDay.checked=entry ? Number(entry.all_day)!==0 : true;
   start.value=entry?.start_time || "";
   end.value=entry?.end_time || "";
+  syncTimeShell(start);
+  syncTimeShell(end);
   syncTiming(prefix);
 }
 function timingPayload(prefix){
@@ -706,6 +746,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   yearOptions(qs("#yearSelect"));
   yearOptions(qs("#filterYear"));
   upgradeDateInputs();
+  upgradeTimeInputs();
   qs("#quickDate").value=isoToday();
   syncDateShell(qs("#quickDate"));
   setTiming("quick");
@@ -714,8 +755,8 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       syncTiming(prefix);
       if(prefix==="batch") resetBatchPreview();
     });
-    qs(`#${prefix}StartTime`)?.addEventListener("change",()=>{if(prefix==="batch")resetBatchPreview();});
-    qs(`#${prefix}EndTime`)?.addEventListener("change",()=>{if(prefix==="batch")resetBatchPreview();});
+    qs(`#${prefix}StartTime`)?.addEventListener("change",()=>{syncOvernight(prefix);if(prefix==="batch")resetBatchPreview();});
+    qs(`#${prefix}EndTime`)?.addEventListener("change",()=>{syncOvernight(prefix);if(prefix==="batch")resetBatchPreview();});
   });
 
   qs("#quickSave").addEventListener("click",async()=>{

@@ -409,7 +409,7 @@ function renderYear(){
       const dayMarks=marks.get(iso)||[];
       const weekend=d.getDay()===0||d.getDay()===6;
       const fill=e?`<div class="entry-fill" style="background:${esc(e.color)}"><span>${esc(e.person)}</span></div>`:"";
-      const continuationTitle=continuation?`Fortsetzung ${continuation.person} vom ${formatDate(continuation.day)} bis ${continuation.end_time}`:"";
+      const continuationTitle=continuation?`Fortsetzung ${continuation.person} vom ${formatDateValue(continuation.day)} bis ${continuation.end_time}`:"";
       const continuationFill=continuation?`<button type="button" class="year-continuation" style="background:${esc(continuation.color)}" title="${esc(continuationTitle)}" aria-label="${esc(continuationTitle)}" onclick="event.stopPropagation();openModal(${continuation.id})"><span>↳ ${esc(continuation.person)} · bis ${esc(continuation.end_time)}</span></button>`:"";
       const markTitle=dayMarks.map(p=>`${periodKindName(p.kind)}: ${p.label}`).join(" · ");
       const rail=dayMarks.length?`<div class="period-rail" title="${esc(markTitle)}">${dayMarks.map(p=>`<span class="period-segment" style="background:${esc(p.color)}"></span>`).join("")}</div>`:"";

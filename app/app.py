@@ -53,12 +53,13 @@ backup_lock = threading.Lock()
 class YearOverviewCell(Flowable):
     """Compact annual-plan cell with optional caregiver fill and period rail."""
 
-    def __init__(self, width, height, entry=None, periods=None):
+    def __init__(self, width, height, entry=None, periods=None, continuation=None):
         super().__init__()
         self.width = width
         self.height = height
         self.entry = entry
         self.periods = periods or []
+        self.continuation = continuation
 
     def wrap(self, availWidth, availHeight):
         return self.width, self.height
@@ -71,6 +72,9 @@ class YearOverviewCell(Flowable):
         gap = 0.8 if self.periods else 0
         fill_w = self.width - (2 * inset_x) - rail_w - gap
         fill_h = self.height - (2 * inset_y)
+        continuation_h = fill_h * 0.27 if self.continuation else 0
+        continuation_gap = 0.55 if self.continuation and self.entry else 0
+        entry_h = fill_h - continuation_h - continuation_gap if self.continuation else fill_h
 
         if self.entry:
             try:
@@ -78,12 +82,13 @@ class YearOverviewCell(Flowable):
             except Exception:
                 bg = colors.HexColor("#ececec")
             c.setFillColor(bg)
-            c.roundRect(inset_x, inset_y, max(1, fill_w), max(1, fill_h), 2.2, stroke=0, fill=1)
+            c.roundRect(inset_x, inset_y, max(1, fill_w), max(1, entry_h), 2.0, stroke=0, fill=1)
 
             label = str(self.entry.get("person") or "")
             max_text_w = max(5, fill_w - 3)
-            font_size = 4.8
-            while font_size > 3.4 and c.stringWidth(label, "Helvetica-Bold", font_size) > max_text_w:
+            font_size = 4.8 if not self.continuation else 4.15
+            min_font = 3.1 if self.continuation else 3.4
+            while font_size > min_font and c.stringWidth(label, "Helvetica-Bold", font_size) > max_text_w:
                 font_size -= 0.25
             if c.stringWidth(label, "Helvetica-Bold", font_size) > max_text_w:
                 while len(label) > 2 and c.stringWidth(label + "…", "Helvetica-Bold", font_size) > max_text_w:
@@ -91,7 +96,28 @@ class YearOverviewCell(Flowable):
                 label += "…"
             c.setFont("Helvetica-Bold", font_size)
             c.setFillColor(colors.HexColor("#1e2524"))
-            c.drawCentredString(inset_x + fill_w / 2, (self.height - font_size) / 2 + 0.7, label)
+            c.drawCentredString(inset_x + fill_w / 2, inset_y + (entry_h - font_size) / 2 + 0.7, label)
+
+        if self.continuation:
+            try:
+                continuation_bg = colors.HexColor(self.continuation.get("color") or "#ececec")
+            except Exception:
+                continuation_bg = colors.HexColor("#ececec")
+            continuation_y = self.height - inset_y - continuation_h
+            c.setFillColor(continuation_bg)
+            c.roundRect(inset_x, continuation_y, max(1, fill_w), max(1, continuation_h), 1.5, stroke=0, fill=1)
+            continuation_label = f"Fort. {self.continuation.get('person') or ''} {self.continuation.get('end_time') or ''}".strip()
+            max_text_w = max(5, fill_w - 2)
+            continuation_font = 3.35
+            while continuation_font > 2.45 and c.stringWidth(continuation_label, "Helvetica-Bold", continuation_font) > max_text_w:
+                continuation_font -= 0.2
+            if c.stringWidth(continuation_label, "Helvetica-Bold", continuation_font) > max_text_w:
+                while len(continuation_label) > 3 and c.stringWidth(continuation_label + "…", "Helvetica-Bold", continuation_font) > max_text_w:
+                    continuation_label = continuation_label[:-1]
+                continuation_label += "…"
+            c.setFont("Helvetica-Bold", continuation_font)
+            c.setFillColor(colors.HexColor("#1e2524"))
+            c.drawCentredString(inset_x + fill_w / 2, continuation_y + max(0.2, (continuation_h - continuation_font) / 2 + 0.25), continuation_label)
 
         if self.periods:
             x = self.width - inset_x - rail_w
@@ -1218,13 +1244,25 @@ def export_year_pdf():
     month_indices = selected_months if selected_months else list(range(1, 13))
     single_month = len(month_indices) == 1
 
-    year_entries = entry_rows("e.day LIKE ?", (f"{year}-%",))
+    range_start = (date(year, 1, 1) - timedelta(days=1)).isoformat()
+    range_end = date(year, 12, 31).isoformat()
+    source_entries = entry_rows("e.day >= ? AND e.day <= ?", (range_start, range_end))
+    year_entries = [row for row in source_entries if row["day"].startswith(f"{year}-")]
     if selected_months:
         prefixes = tuple(f"{year}-{m:02d}-" for m in month_indices)
         display_entries = [row for row in year_entries if row["day"].startswith(prefixes)]
     else:
         display_entries = year_entries
     by_day = {row["day"]: row for row in display_entries}
+    continuation_by_day = {}
+    for row in source_entries:
+        if row.get("all_day") or not row.get("start_time") or not row.get("end_time"):
+            continue
+        if row["end_time"] >= row["start_time"]:
+            continue
+        next_day = date.fromisoformat(row["day"]) + timedelta(days=1)
+        if next_day.year == year and next_day.month in set(month_indices):
+            continuation_by_day[next_day.isoformat()] = row
 
     year_periods = period_rows(str(year))
     selected_month_set = set(month_indices)
@@ -1328,7 +1366,13 @@ def export_year_pdf():
             iso = d.isoformat()
             if d.weekday() >= 5:
                 style_cmds.append(("BACKGROUND", (col_pos, pdf_row), (col_pos, pdf_row), colors.HexColor("#fff2b9")))
-            row.append(YearOverviewCell(month_w, day_h, by_day.get(iso), periods_by_day.get(iso, [])))
+            row.append(YearOverviewCell(
+                month_w,
+                day_h,
+                by_day.get(iso),
+                periods_by_day.get(iso, []),
+                continuation_by_day.get(iso),
+            ))
         row.append(str(day_num))
         data.append(row)
 
@@ -1343,13 +1387,15 @@ def export_year_pdf():
     legend_items = []
     used_people = []
     seen_people = set()
-    for entry in display_entries:
+    for entry in list(display_entries) + list(continuation_by_day.values()):
         key = (entry["person"], entry["color"])
         if key not in seen_people:
             seen_people.add(key)
             used_people.append(key)
     legend_items.extend(used_people)
     legend_items.append(("Wochenende", "#fff2b9"))
+    if continuation_by_day:
+        legend_items.append(("Fort. = Fortsetzung vom Vortag", "#e4efeb"))
 
     kind_names = {"vacation": "Ferien", "holiday": "Feiertage", "other": "Markierung"}
     seen_period_legend = set()

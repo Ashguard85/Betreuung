@@ -232,6 +232,24 @@ function itemHtml(e){
     <button class="kebab">›</button>
   </div>`;
 }
+function addDaysIso(day, amount=1){
+  const d=new Date(day+"T12:00:00");
+  d.setDate(d.getDate()+amount);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function entryContinuesNextDay(e){
+  return Boolean(e && Number(e.all_day)===0 && e.start_time && e.end_time && e.end_time < e.start_time);
+}
+function continuationItemHtml(e, day){
+  const d=new Date(day+"T12:00:00");
+  const from=formatIsoDate(e.day);
+  return `<div class="item continuation-item" onclick="openModal(${e.id})">
+    <div class="datebox continuation-date"><b>${d.getDate()}</b><span>${monthShort(d)}</span></div>
+    <div><div class="who"><span class="dot" style="background:${esc(e.color)}"></span>${esc(e.person)} <span class="continuation-badge">Fortsetzung</span></div>
+    <div class="note">${weekdayShort(d)} · bis ${esc(e.end_time)} · vom ${esc(from)}${e.note?" · "+esc(e.note):""}</div></div>
+    <button class="kebab" aria-label="Ursprünglichen Termin öffnen">›</button>
+  </div>`;
+}
 function exportPeopleAreAll(){
   return people.length>0 && exportPeople.length===people.length && people.every(p=>exportPeople.includes(p.name));
 }
@@ -319,11 +337,20 @@ function yearMonthQuery(){
 function renderList(){
   const year=qs("#filterYear").value;
   const search=qs("#filterSearch").value.toLowerCase().trim();
-  let arr=entries.filter(e=>e.day.startsWith(year));
-  if(!exportPeopleAreAll()) arr=arr.filter(e=>exportPeople.includes(e.person));
-  if(search) arr=arr.filter(e=>(e.note||"").toLowerCase().includes(search)||e.person.toLowerCase().includes(search));
-  arr.sort((a,b)=>a.day.localeCompare(b.day));
-  qs("#fullList").innerHTML=arr.length?arr.map(itemHtml).join(""):'<div class="small">Keine Einträge.</div>';
+  let source=entries.slice();
+  if(!exportPeopleAreAll()) source=source.filter(e=>exportPeople.includes(e.person));
+  if(search) source=source.filter(e=>(e.note||"").toLowerCase().includes(search)||e.person.toLowerCase().includes(search));
+
+  const rows=[];
+  for(const e of source){
+    if(e.day.startsWith(year)) rows.push({day:e.day, kind:1, html:itemHtml(e)});
+    if(entryContinuesNextDay(e)){
+      const nextDay=addDaysIso(e.day,1);
+      if(nextDay.startsWith(year)) rows.push({day:nextDay, kind:0, html:continuationItemHtml(e,nextDay)});
+    }
+  }
+  rows.sort((a,b)=>a.day.localeCompare(b.day)||a.kind-b.kind);
+  qs("#fullList").innerHTML=rows.length?rows.map(r=>r.html).join(""):'<div class="small">Keine Einträge.</div>';
 
   updateExportControls();
   const exportLabel=exportPeopleAreAll()?"alle Personen":exportPeople.length===1?exportPeople[0]:`${exportPeople.length} Personen`;
@@ -361,6 +388,12 @@ function renderYear(){
   const year=Number(qs("#yearSelect").value);
   const visibleMonths=yearMonths.map(m=>m-1);
   const byDay=new Map(entries.filter(e=>e.day.startsWith(String(year))).map(e=>[e.day,e]));
+  const continuationByDay=new Map();
+  for(const e of entries){
+    if(!entryContinuesNextDay(e)) continue;
+    const nextDay=addDaysIso(e.day,1);
+    if(nextDay.startsWith(String(year))) continuationByDay.set(nextDay,e);
+  }
   const marks=periodMapForYear(year);
   const tableClass=visibleMonths.length===1?"year month-view":"year";
   let out=`<table class="${tableClass}"><colgroup><col class="day-col">${visibleMonths.map(()=>'<col class="month-col">').join("")}<col class="day-col"></colgroup><thead><tr><th>Tag</th>${visibleMonths.map(i=>`<th>${YEAR_MONTH_NAMES[i]}</th>`).join("")}<th>Tag</th></tr></thead><tbody>`;
@@ -372,13 +405,16 @@ function renderYear(){
       if(!valid){out+='<td class="invalid"></td>';continue;}
       const iso=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
       const e=byDay.get(iso);
+      const continuation=continuationByDay.get(iso);
       const dayMarks=marks.get(iso)||[];
       const weekend=d.getDay()===0||d.getDay()===6;
       const fill=e?`<div class="entry-fill" style="background:${esc(e.color)}"><span>${esc(e.person)}</span></div>`:"";
+      const continuationTitle=continuation?`Fortsetzung ${continuation.person} vom ${formatDate(continuation.day)} bis ${continuation.end_time}`:"";
+      const continuationFill=continuation?`<button type="button" class="year-continuation" style="background:${esc(continuation.color)}" title="${esc(continuationTitle)}" aria-label="${esc(continuationTitle)}" onclick="event.stopPropagation();openModal(${continuation.id})"><span>↳ ${esc(continuation.person)} · bis ${esc(continuation.end_time)}</span></button>`:"";
       const markTitle=dayMarks.map(p=>`${periodKindName(p.kind)}: ${p.label}`).join(" · ");
       const rail=dayMarks.length?`<div class="period-rail" title="${esc(markTitle)}">${dayMarks.map(p=>`<span class="period-segment" style="background:${esc(p.color)}"></span>`).join("")}</div>`:"";
-      const cellClass=[weekend?"weekend":"",dayMarks.length?"has-period":""].filter(Boolean).join(" ");
-      out+=`<td class="${cellClass}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}"><div class="year-cell-content">${fill}${rail}</div></td>`;
+      const cellClass=[weekend?"weekend":"",dayMarks.length?"has-period":"",continuation?"has-continuation":""].filter(Boolean).join(" ");
+      out+=`<td class="${cellClass}" onclick="${e?`openModal(${e.id})`:`prefillDate('${iso}')`}"><div class="year-cell-content">${fill}${continuationFill}${rail}</div></td>`;
     }
     out+=`<td class="day-repeat">${day}</td></tr>`;
   }
@@ -392,7 +428,7 @@ function renderYear(){
     seen.add(key);
     periodLegend.push(`<span class="period-legend"><i class="bar-swatch" style="background:${esc(p.color)}"></i>${periodKindName(p.kind)}</span>`);
   }
-  qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span>`+periodLegend.join("");
+  qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span><span class="continuation-legend">↳ Fortsetzung vom Vortag</span>`+periodLegend.join("");
   const monthParams=yearMonthQuery();
   const monthQuery=monthParams.toString();
   qs("#csvLink").href=`/export.csv?year=${year}${monthQuery?`&${monthQuery}`:""}`;

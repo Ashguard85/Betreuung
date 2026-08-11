@@ -270,10 +270,29 @@ function exportParams(){
   if(!exportPeopleAreAll()) exportPeople.forEach(name=>params.append("person",name));
   return params;
 }
+function calendarRangeParams(){
+  const params=new URLSearchParams();
+  const from=qs("#listRangeFrom")?.value || "";
+  const to=qs("#listRangeTo")?.value || "";
+  const search=qs("#filterSearch").value.toLowerCase().trim();
+  if(from) params.set("from",from);
+  if(to) params.set("to",to);
+  if(search) params.set("q",search);
+  if(!exportPeopleAreAll()) exportPeople.forEach(name=>params.append("person",name));
+  return params;
+}
+function setCalendarRangeForYear(year){
+  if(!year) return;
+  const from=qs("#listRangeFrom"), to=qs("#listRangeTo");
+  if(from){from.value=`${year}-01-01`;syncDateShell(from);}
+  if(to){to.value=`${year}-12-31`;syncDateShell(to);}
+}
 function updateExportControls(){
   const params=exportParams();
   qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
   qs("#listPdfButton").dataset.url=`/export.pdf?${params.toString()}`;
+  const icsButton=qs("#listIcsButton");
+  if(icsButton) icsButton.dataset.url=`/export.ics?${calendarRangeParams().toString()}`;
   const button=qs("#listExportPeople");
   if(button){
     if(exportPeopleAreAll()) button.textContent="Personen: Alle";
@@ -914,6 +933,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   upgradeTimeInputs();
   qs("#quickDate").value=isoToday();
   syncDateShell(qs("#quickDate"));
+  setCalendarRangeForYear(qs("#filterYear").value);
   qs("#quickDate").addEventListener("change",()=>updateDateContext("quick"));
   qs("#modalDate").addEventListener("change",()=>updateDateContext("modal"));
   setTiming("quick");
@@ -983,7 +1003,15 @@ document.addEventListener("DOMContentLoaded", async ()=>{
 
   qs("#saveIcalTitle")?.addEventListener("click",async()=>{try{const v=qs("#icalTitleTemplate").value.trim()||"{person}";await api("/api/config",{method:"PUT",body:JSON.stringify({ical_title_template:v})});toast("Kalendertitel gespeichert");}catch(e){toast(e.message);}});
   qs("#refreshHistory")?.addEventListener("click",loadHistory);
-  qs("#filterYear").addEventListener("change",renderList);
+  qs("#filterYear").addEventListener("change",()=>{setCalendarRangeForYear(qs("#filterYear").value);renderList();});
+  qs("#listRangeFrom")?.addEventListener("change",updateExportControls);
+  qs("#listRangeTo")?.addEventListener("change",updateExportControls);
+  qs("#listIcsButton")?.addEventListener("click",()=>{
+    const from=qs("#listRangeFrom").value, to=qs("#listRangeTo").value;
+    if(!from || !to) return toast("Von und Bis wählen");
+    if(from>to) return toast("Von liegt nach Bis");
+    shareServerFile(qs("#listIcsButton").dataset.url,`betreuung-${from}-bis-${to}.ics`,"text/calendar","Kalenderdatei wird erstellt …");
+  });
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});
   qs("#yearMonthSelect").addEventListener("click",openYearMonthsModal);

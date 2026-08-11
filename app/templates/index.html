@@ -80,9 +80,20 @@
         <select id="filterYear" class="input"></select>
       </div>
       <input id="filterSearch" class="input" placeholder="Suchen …"/>
+      <div class="calendar-range-export">
+        <div class="calendar-range-head">
+          <strong>Kalenderexport</strong>
+          <span class="small">Einmalige .ics-Datei</span>
+        </div>
+        <div class="calendar-range-grid">
+          <label><span class="label">Von</span><input id="listRangeFrom" class="input" type="date"></label>
+          <label><span class="label">Bis</span><input id="listRangeTo" class="input" type="date"></label>
+        </div>
+      </div>
       <div class="list-actions">
         <a id="listCsvLink" class="secondary linkbtn server-export" href="#">CSV</a>
         <button id="listPdfButton" class="secondary server-export" type="button">PDF / Teilen</button>
+        <button id="listIcsButton" class="secondary server-export" type="button">Kalender (.ics)</button>
         <span id="listExportHint" class="small"></span>
       </div>
       <div class="space"></div>

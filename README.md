@@ -158,3 +158,8 @@ Personen-Kalender verwenden ab v30 jeweils einen eigenen zufälligen, widerrufba
 
 ## v33
 Setup-Bereiche sind einklappbar, Kalenderlinks werden vollständig umbrochen angezeigt, Personenfeeds sind einzeln einklappbar und der Änderungsverlauf besitzt nun die fehlenden API-Endpunkte.
+
+
+## Kalenderexport eines Zeitraums
+
+In der Listenansicht kann ein frei gewählter Zeitraum als einmalige `.ics`-Datei exportiert werden. Die aktuelle Personenauswahl und Suche werden übernommen. So kann z. B. nach abgeschlossener Planung das komplette Jahr 01.01.–31.12. in Outlook, Apple Kalender oder andere iCalendar-kompatible Programme importiert werden. Nachtbetreuungen, die vom Vortag in den gewählten Zeitraum hineinreichen, werden ebenfalls berücksichtigt.

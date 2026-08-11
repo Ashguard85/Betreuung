@@ -2154,6 +2154,69 @@ def build_ics_calendar(rows, host, calendar_name):
     return "\r\n".join(lines) + "\r\n"
 
 
+def rows_for_calendar_range(start_day, end_day, people=None, search=""):
+    """Return entries whose actual event interval overlaps the inclusive date range."""
+    people = [p for p in (people or []) if p]
+    # Fetch one day before the range so an overnight entry can continue into start_day.
+    fetch_start = (date.fromisoformat(start_day) - timedelta(days=1)).isoformat()
+    clauses = ["e.day >= ?", "e.day <= ?"]
+    params = [fetch_start, end_day]
+    if people:
+        placeholders = ",".join("?" for _ in people)
+        clauses.append(f"p.name IN ({placeholders})")
+        params.extend(people)
+    if search:
+        clauses.append("(LOWER(e.note) LIKE ? OR LOWER(p.name) LIKE ?)")
+        needle = f"%{search.lower()}%"
+        params.extend([needle, needle])
+    rows = entry_rows(" AND ".join(clauses), tuple(params))
+    wanted_start = date.fromisoformat(start_day)
+    wanted_end = date.fromisoformat(end_day)
+    result = []
+    for row in rows:
+        event_start = date.fromisoformat(row["day"])
+        event_end = event_start
+        if not row.get("all_day") and row.get("start_time") and row.get("end_time") and row["end_time"] < row["start_time"]:
+            event_end += timedelta(days=1)
+        if event_end >= wanted_start and event_start <= wanted_end:
+            result.append(row)
+    return result
+
+
+@app.get("/export.ics")
+@login_required
+def export_ics_range():
+    start_day = valid_iso_day(request.args.get("from", ""))
+    end_day = valid_iso_day(request.args.get("to", ""))
+    if not start_day or not end_day:
+        return Response("Ungültiger Zeitraum", status=400)
+    if start_day > end_day:
+        return Response("Von-Datum liegt nach Bis-Datum", status=400)
+    if (date.fromisoformat(end_day) - date.fromisoformat(start_day)).days > 3660:
+        return Response("Zeitraum ist zu groß", status=400)
+
+    people = [p.strip() for p in request.args.getlist("person") if p.strip()]
+    search = request.args.get("q", "").strip()
+    rows = rows_for_calendar_range(start_day, end_day, people, search)
+    host = request.host.split(":")[0]
+    if len(people) == 1:
+        calendar_name = f"{APP_TITLE} – {people[0]}"
+    else:
+        calendar_name = f"{APP_TITLE} – {start_day} bis {end_day}"
+    body = build_ics_calendar(rows, host, calendar_name)
+    filename = f"betreuung-{start_day}-bis-{end_day}.ics"
+    return Response(
+        body,
+        mimetype="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.get("/api/entries/<int:entry_id>/ics")
 @login_required
 def entry_ics_export(entry_id):

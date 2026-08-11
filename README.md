@@ -108,14 +108,22 @@ Wenn die App übers Internet erreichbar ist, HTTPS verwenden. Bei `AUTH_ENABLED=
 
 ## iCal / Cloudflare Access
 
+Für alle intern erzeugten Kalender-Links wird HTTPS verwendet. Empfohlen ist im Stack:
+
+```yaml
+- APP_URL=https://betreuung.example.ch
+```
+
+`APP_URL` muss eine vollständige HTTPS-URL sein. Ohne `APP_URL` erzeugt die App als Fallback `https://<aktueller-host>/calendar.ics`.
+
 Der Endpunkt `/calendar.ics` liefert immer `Cache-Control: private, no-store` sowie zusätzliche No-Cache-Header aus. Wenn Cloudflare Access mit OTP eingesetzt wird, kann nur dieser exakte Pfad als Bypass freigegeben werden; der geheime Token wird weiterhin von der App geprüft.
 
 Im Setup werden zwei Arten von Links angezeigt:
 
 - **Gesamtkalender**: enthält alle Betreuungseinträge und verwendet den globalen `ICAL_TOKEN`. Diesen Link nicht weitergeben.
-- **Pro Person**: enthält nur die Termine dieser Person und verwendet einen aus `ICAL_TOKEN` abgeleiteten HMAC-Token. Ein Personen-Link kann deshalb nicht durch Ändern des `person`-Parameters für eine andere Person verwendet werden.
+- **Pro Person**: enthält nur die Termine dieser Person und verwendet einen eigenen zufälligen, widerrufbaren Personen-Token. Ein Personen-Link kann deshalb unabhängig von allen anderen Freigaben widerrufen werden.
 
-Die Personen-Links verwenden weiterhin denselben Pfad `/calendar.ics`, daher reicht in Cloudflare Access eine einzige Bypass-Regel exakt für diesen Pfad. Wird eine Person umbenannt, muss ihr Personen-Kalender neu abonniert werden.
+Die Personen-Links verwenden weiterhin denselben Pfad `/calendar.ics`, daher reicht in Cloudflare Access eine einzige Bypass-Regel exakt für diesen Pfad. Eine Umbenennung ändert den persönlichen Freigabe-Link nicht. Nur „Freigabe widerrufen“ erzeugt bewusst einen neuen Token und macht den alten Link ungültig.
 
 ## Neu in v22 – Uhrzeiten & Termin teilen
 

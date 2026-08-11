@@ -39,6 +39,7 @@ AUTH_ENABLED = os.getenv("AUTH_ENABLED", "false").strip().lower() in {"1", "true
 APP_USER = os.getenv("APP_USER", "familie")
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 ICAL_TOKEN = os.getenv("ICAL_TOKEN", "")
+APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 
 if AUTH_ENABLED and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD muss gesetzt sein, wenn AUTH_ENABLED=true ist.")
@@ -483,8 +484,20 @@ def entry_rows(where="", params=()):
         return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
+def public_app_url():
+    """Public HTTPS base URL used for shareable calendar links."""
+    if APP_URL:
+        parsed = urlparse(APP_URL)
+        if parsed.scheme.lower() != "https" or not parsed.netloc:
+            raise RuntimeError("APP_URL muss eine vollständige HTTPS-URL sein, z. B. https://betreuung.example.ch")
+        return APP_URL
+    # Reverse-proxy friendly fallback: calendar subscription links are always HTTPS.
+    # APP_URL is still recommended so links never depend on the incoming Host header.
+    return f"https://{request.host.split(':')[0]}"
+
+
 def ical_feed_url(person_id=None, person_token=None):
-    base = request.url_root.rstrip("/") + "/calendar.ics"
+    base = public_app_url() + "/calendar.ics"
     if not ICAL_TOKEN:
         return None
     if person_id is not None and person_token:

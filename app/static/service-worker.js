@@ -1,4 +1,4 @@
-const VERSION = "betreuung-pwa-v29";
+const VERSION = "betreuung-pwa-v30";
 const STATIC_CACHE = `${VERSION}-static`;
 const DATA_CACHE = `${VERSION}-data`;
 const PAGE_CACHE = `${VERSION}-pages`;

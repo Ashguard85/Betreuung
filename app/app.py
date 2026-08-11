@@ -7,7 +7,10 @@ import re
 import secrets
 import sqlite3
 import threading
-from urllib.parse import urlencode
+import socket
+import ipaddress
+import time
+from urllib.parse import urlencode, urlparse, urljoin
 from datetime import datetime, date, timedelta
 from functools import wraps
 from pathlib import Path
@@ -17,6 +20,9 @@ from flask import (
     Flask, Response, jsonify, redirect, render_template, request,
     session, url_for, send_from_directory
 )
+
+import requests
+import qrcode
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -192,7 +198,8 @@ def init_db():
           name TEXT NOT NULL UNIQUE,
           color TEXT NOT NULL DEFAULT '#ececec',
           sort_order INTEGER NOT NULL DEFAULT 100,
-          ical_title TEXT NOT NULL DEFAULT ''
+          ical_title TEXT NOT NULL DEFAULT '',
+          calendar_token TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS entries (
@@ -230,6 +237,19 @@ def init_db():
           value TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS calendar_subscriptions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          url TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'holiday',
+          color TEXT NOT NULL DEFAULT '#d65a6f',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_sync_at TEXT NOT NULL DEFAULT '',
+          last_status TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS history (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           action TEXT NOT NULL,
@@ -250,12 +270,19 @@ def init_db():
         people_columns = {r["name"] for r in conn.execute("PRAGMA table_info(people)").fetchall()}
         if "ical_title" not in people_columns:
             conn.execute("ALTER TABLE people ADD COLUMN ical_title TEXT NOT NULL DEFAULT ''")
+        if "calendar_token" not in people_columns:
+            conn.execute("ALTER TABLE people ADD COLUMN calendar_token TEXT NOT NULL DEFAULT ''")
+
+        # Every person gets an independent revocable calendar token.
+        for row in conn.execute("SELECT id,calendar_token FROM people").fetchall():
+            if not row["calendar_token"]:
+                conn.execute("UPDATE people SET calendar_token=? WHERE id=?", (secrets.token_urlsafe(32), row["id"]))
 
         existing = conn.execute("SELECT COUNT(*) AS c FROM people").fetchone()["c"]
         if existing == 0:
             conn.executemany(
-                "INSERT INTO people(name,color,sort_order) VALUES(?,?,?)",
-                DEFAULT_PEOPLE,
+                "INSERT INTO people(name,color,sort_order,calendar_token) VALUES(?,?,?,?)",
+                [(name,color,order,secrets.token_urlsafe(32)) for name,color,order in DEFAULT_PEOPLE],
             )
 
 
@@ -456,26 +483,24 @@ def entry_rows(where="", params=()):
         return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
-def person_ical_token(person_name):
-    """Derive a token that is valid only for one named person's feed."""
-    if not ICAL_TOKEN:
-        return ""
-    return hmac.new(
-        ICAL_TOKEN.encode("utf-8"),
-        ("person:" + person_name).encode("utf-8"),
-        digestmod="sha256",
-    ).hexdigest()
-
-
-def ical_feed_url(person_name=None):
+def ical_feed_url(person_id=None, person_token=None):
     base = request.url_root.rstrip("/") + "/calendar.ics"
     if not ICAL_TOKEN:
         return None
-    if person_name:
-        params = {"person": person_name, "token": person_ical_token(person_name)}
+    if person_id is not None and person_token:
+        params = {"person_id": int(person_id), "token": person_token}
     else:
         params = {"token": ICAL_TOKEN}
     return base + "?" + urlencode(params)
+
+
+def qr_png_response(value):
+    image = qrcode.make(value)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    response = Response(buf.getvalue(), mimetype="image/png")
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    return response
 
 
 @app.after_request
@@ -514,16 +539,17 @@ def api_config():
     if ICAL_TOKEN:
         with db() as conn:
             rows = conn.execute(
-                "SELECT name,color,ical_title FROM people ORDER BY sort_order,name"
+                "SELECT id,name,color,ical_title,calendar_token FROM people ORDER BY sort_order,name"
             ).fetchall()
         person_urls = [
-            {"name": r["name"], "color": r["color"], "ical_title": r["ical_title"], "url": ical_feed_url(r["name"])}
+            {"id": r["id"], "name": r["name"], "color": r["color"], "ical_title": r["ical_title"], "url": ical_feed_url(r["id"], r["calendar_token"]), "qr_url": f"/api/people/{r["id"]}/calendar-qr.png"}
             for r in rows
         ]
     return jsonify({
         "title": APP_TITLE,
         "ical_enabled": bool(ICAL_TOKEN),
         "ical_url": ical_feed_url() if ICAL_TOKEN else None,
+        "ical_qr_url": "/api/calendar-qr.png" if ICAL_TOKEN else None,
         "ical_person_urls": person_urls,
         "data_file": str(DB_PATH),
         "backup_dir": str(BACKUP_DIR),
@@ -569,8 +595,8 @@ def api_people_add():
         with db() as conn:
             max_order = conn.execute("SELECT COALESCE(MAX(sort_order),0) AS m FROM people").fetchone()["m"]
             cur = conn.execute(
-                "INSERT INTO people(name,color,sort_order) VALUES(?,?,?)",
-                (name, color, max_order + 10),
+                "INSERT INTO people(name,color,sort_order,ical_title,calendar_token) VALUES(?,?,?,?,?)",
+                (name, color, max_order + 10, ical_title, secrets.token_urlsafe(32)),
             )
             new_id = cur.lastrowid
         backup_db("person-add")
@@ -612,6 +638,37 @@ def api_people_delete(person_id):
         return jsonify({"ok": True})
     except sqlite3.IntegrityError:
         return jsonify({"error": "Person wird noch in Betreuungseinträgen verwendet"}), 409
+
+
+@app.post("/api/people/<int:person_id>/calendar-token/reset")
+@login_required
+def api_person_calendar_token_reset(person_id):
+    new_token = secrets.token_urlsafe(32)
+    with db() as conn:
+        row = conn.execute("SELECT id FROM people WHERE id=?", (person_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "Person nicht gefunden"}), 404
+        conn.execute("UPDATE people SET calendar_token=? WHERE id=?", (new_token, person_id))
+    backup_db("calendar-token-reset")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/people/<int:person_id>/calendar-qr.png")
+@login_required
+def api_person_calendar_qr(person_id):
+    with db() as conn:
+        row = conn.execute("SELECT calendar_token FROM people WHERE id=?", (person_id,)).fetchone()
+    if not row or not ICAL_TOKEN:
+        return Response("Not found", status=404)
+    return qr_png_response(ical_feed_url(person_id, row["calendar_token"]))
+
+
+@app.get("/api/calendar-qr.png")
+@login_required
+def api_calendar_qr():
+    if not ICAL_TOKEN:
+        return Response("Not found", status=404)
+    return qr_png_response(ical_feed_url())
 
 
 @app.get("/api/entries")
@@ -1027,6 +1084,204 @@ def expand_ics_dates(event):
             continue
         dates.append((occurrence_start, occurrence_start + duration, year))
     return dates
+
+
+def _subscription_url_is_safe(url):
+    try:
+        parsed = urlparse(str(url or "").strip())
+    except Exception:
+        return False, "Ungültige URL"
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+        return False, "Nur HTTP/HTTPS-URLs sind erlaubt"
+    if parsed.username or parsed.password:
+        return False, "Benutzername/Passwort in der URL werden nicht unterstützt"
+    if parsed.scheme == "http" and os.getenv("ALLOW_HTTP_CALENDAR_SUBSCRIPTIONS", "false").lower() not in {"1","true","yes","on"}:
+        return False, "Kalender-Abos müssen HTTPS verwenden"
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                return False, "Interne/private Zieladressen sind nicht erlaubt"
+    except Exception:
+        return False, "Kalender-Host konnte nicht aufgelöst werden"
+    return True, ""
+
+
+def fetch_subscription_ics(url):
+    current = url
+    for _ in range(4):
+        safe, error = _subscription_url_is_safe(current)
+        if not safe:
+            raise ValueError(error)
+        response = requests.get(current, timeout=(5, 20), allow_redirects=False, headers={"User-Agent": "Betreuungsplan/30", "Accept": "text/calendar,text/plain;q=0.9,*/*;q=0.2"})
+        if response.status_code in {301,302,303,307,308}:
+            location = response.headers.get("Location")
+            if not location:
+                raise ValueError("Kalender-Weiterleitung ohne Ziel")
+            current = urljoin(current, location)
+            continue
+        if response.status_code < 200 or response.status_code >= 300:
+            raise ValueError(f"Kalender-Server antwortet mit HTTP {response.status_code}")
+        if len(response.content) > 5 * 1024 * 1024:
+            raise ValueError("Kalender ist größer als 5 MB")
+        try:
+            return response.content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return response.content.decode("latin-1")
+    raise ValueError("Zu viele Weiterleitungen")
+
+
+def sync_calendar_subscription(subscription_id):
+    with db() as conn:
+        sub = conn.execute("SELECT * FROM calendar_subscriptions WHERE id=?", (subscription_id,)).fetchone()
+    if not sub:
+        raise ValueError("Kalender-Abo nicht gefunden")
+    if not sub["enabled"]:
+        return {"imported": 0, "skipped": 0, "disabled": True}
+    now = datetime.now().isoformat(timespec="seconds")
+    try:
+        raw = fetch_subscription_ics(sub["url"])
+        imported = 0
+        skipped = 0
+        keep_uids = []
+        source = f"subscription:{subscription_id}"
+        with db() as conn:
+            for event in parse_ics_events(raw):
+                occurrences = expand_ics_dates(event)
+                if not occurrences:
+                    skipped += 1
+                    continue
+                summary = ics_unescape(event.get("SUMMARY", ("SUMMARY", "Kalendertermin"))[1]).strip() or "Kalendertermin"
+                uid = ics_unescape(event.get("UID", ("UID", ""))[1]).strip()
+                for start_obj, end_obj, recurrence_year in occurrences:
+                    base_uid = uid if uid else f"{start_obj.isoformat()}:{end_obj.isoformat()}:{summary}"
+                    external_uid = f"sub:{subscription_id}:" + base_uid + (f":{recurrence_year}" if recurrence_year else "")
+                    keep_uids.append(external_uid)
+                    conn.execute(
+                        """INSERT INTO periods(start_day,end_day,kind,label,color,source,external_uid,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,?,?,?)
+                           ON CONFLICT(external_uid) DO UPDATE SET
+                             start_day=excluded.start_day,end_day=excluded.end_day,kind=excluded.kind,
+                             label=excluded.label,color=excluded.color,source=excluded.source,updated_at=excluded.updated_at""",
+                        (start_obj.isoformat(), end_obj.isoformat(), sub["kind"], summary, sub["color"], source, external_uid, now, now),
+                    )
+                    imported += 1
+            if keep_uids:
+                placeholders = ",".join("?" for _ in keep_uids)
+                conn.execute(f"DELETE FROM periods WHERE source=? AND external_uid NOT IN ({placeholders})", (source, *keep_uids))
+            else:
+                conn.execute("DELETE FROM periods WHERE source=?", (source,))
+            conn.execute("UPDATE calendar_subscriptions SET last_sync_at=?,last_status=?,updated_at=? WHERE id=?", (now, f"OK · {imported} Termine", now, subscription_id))
+        return {"imported": imported, "skipped": skipped}
+    except Exception as exc:
+        with db() as conn:
+            conn.execute("UPDATE calendar_subscriptions SET last_sync_at=?,last_status=?,updated_at=? WHERE id=?", (now, f"Fehler · {str(exc)[:180]}", now, subscription_id))
+        raise
+
+
+def subscription_rows():
+    with db() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM calendar_subscriptions ORDER BY name,id").fetchall()]
+
+
+@app.get("/api/calendar-subscriptions")
+@login_required
+def api_calendar_subscriptions():
+    return jsonify(subscription_rows())
+
+
+@app.post("/api/calendar-subscriptions")
+@login_required
+def api_calendar_subscriptions_add():
+    payload = request.get_json(force=True)
+    name = str(payload.get("name", "")).strip()
+    url = str(payload.get("url", "")).strip()
+    kind = str(payload.get("kind", "holiday")).strip() or "holiday"
+    if kind not in {"holiday","vacation","other"}:
+        kind = "other"
+    default_color = "#d65a6f" if kind == "holiday" else "#f2a65a" if kind == "vacation" else "#80a4c2"
+    color = valid_color(payload.get("color"), default_color)
+    if not name or not url:
+        return jsonify({"error": "Name und Kalender-URL sind erforderlich"}), 400
+    safe, error = _subscription_url_is_safe(url)
+    if not safe:
+        return jsonify({"error": error}), 400
+    now = datetime.now().isoformat(timespec="seconds")
+    with db() as conn:
+        cur = conn.execute("INSERT INTO calendar_subscriptions(name,url,kind,color,enabled,last_sync_at,last_status,created_at,updated_at) VALUES(?,?,?,?,1,'','Noch nicht synchronisiert',?,?)", (name,url,kind,color,now,now))
+        sub_id = cur.lastrowid
+    try:
+        result = sync_calendar_subscription(sub_id)
+    except Exception as exc:
+        result = {"warning": str(exc)}
+    backup_db("calendar-subscription-add")
+    return jsonify({"id": sub_id, **result}), 201
+
+
+@app.put("/api/calendar-subscriptions/<int:subscription_id>")
+@login_required
+def api_calendar_subscriptions_update(subscription_id):
+    payload = request.get_json(force=True)
+    with db() as conn:
+        current = conn.execute("SELECT * FROM calendar_subscriptions WHERE id=?", (subscription_id,)).fetchone()
+    if not current:
+        return jsonify({"error": "Kalender-Abo nicht gefunden"}), 404
+    name = str(payload.get("name", current["name"])).strip()
+    url = str(payload.get("url", current["url"])).strip()
+    kind = str(payload.get("kind", current["kind"])).strip()
+    color = valid_color(payload.get("color", current["color"]), current["color"])
+    enabled = 1 if bool(payload.get("enabled", current["enabled"])) else 0
+    safe, error = _subscription_url_is_safe(url)
+    if not safe:
+        return jsonify({"error": error}), 400
+    now = datetime.now().isoformat(timespec="seconds")
+    with db() as conn:
+        conn.execute("UPDATE calendar_subscriptions SET name=?,url=?,kind=?,color=?,enabled=?,updated_at=? WHERE id=?", (name,url,kind,color,enabled,now,subscription_id))
+    if enabled:
+        try: sync_calendar_subscription(subscription_id)
+        except Exception: pass
+    else:
+        with db() as conn: conn.execute("DELETE FROM periods WHERE source=?", (f"subscription:{subscription_id}",))
+    backup_db("calendar-subscription-update")
+    return jsonify({"ok": True})
+
+
+@app.post("/api/calendar-subscriptions/<int:subscription_id>/sync")
+@login_required
+def api_calendar_subscriptions_sync(subscription_id):
+    try:
+        result = sync_calendar_subscription(subscription_id)
+        backup_db("calendar-subscription-sync")
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.delete("/api/calendar-subscriptions/<int:subscription_id>")
+@login_required
+def api_calendar_subscriptions_delete(subscription_id):
+    with db() as conn:
+        conn.execute("DELETE FROM periods WHERE source=?", (f"subscription:{subscription_id}",))
+        conn.execute("DELETE FROM calendar_subscriptions WHERE id=?", (subscription_id,))
+    backup_db("calendar-subscription-delete")
+    return jsonify({"ok": True})
+
+
+def sync_all_calendar_subscriptions():
+    for sub in subscription_rows():
+        if sub["enabled"]:
+            try: sync_calendar_subscription(sub["id"])
+            except Exception: pass
+
+
+def calendar_subscription_worker():
+    # Delay startup so the web process becomes responsive immediately.
+    time.sleep(15)
+    interval = max(1, int(os.getenv("SUBSCRIPTION_SYNC_HOURS", "12"))) * 3600
+    while True:
+        sync_all_calendar_subscriptions()
+        time.sleep(interval)
 
 
 @app.post("/import.ics")
@@ -1585,7 +1840,7 @@ def export_data_json():
     """Portable full backup of all user-managed application data."""
     with db() as conn:
         people = [dict(r) for r in conn.execute(
-            "SELECT name,color,sort_order,ical_title FROM people ORDER BY sort_order,name"
+            "SELECT name,color,sort_order,ical_title,calendar_token FROM people ORDER BY sort_order,name"
         ).fetchall()]
         entries = [dict(r) for r in conn.execute(
             """SELECT e.day,p.name AS person,e.note,e.all_day,e.start_time,e.end_time,e.created_at,e.updated_at
@@ -1594,17 +1849,22 @@ def export_data_json():
         ).fetchall()]
         periods = [dict(r) for r in conn.execute(
             """SELECT start_day,end_day,kind,label,color,source,external_uid,created_at,updated_at
-               FROM periods ORDER BY start_day,end_day,label"""
+               FROM periods WHERE source NOT LIKE 'subscription:%' ORDER BY start_day,end_day,label"""
+        ).fetchall()]
+        subscriptions = [dict(r) for r in conn.execute(
+            """SELECT name,url,kind,color,enabled,last_sync_at,last_status,created_at,updated_at
+               FROM calendar_subscriptions ORDER BY name,id"""
         ).fetchall()]
 
     payload = {
         "format": "betreuungsplan-backup",
-        "version": 1,
+        "version": 2,
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "app_title": APP_TITLE,
         "people": people,
         "entries": entries,
         "periods": periods,
+        "calendar_subscriptions": subscriptions,
     }
     raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     filename = f"betreuungsplan-backup-{date.today().isoformat()}.json"
@@ -1633,13 +1893,14 @@ def import_data_json():
 
     if not isinstance(payload, dict) or payload.get("format") != "betreuungsplan-backup":
         return jsonify({"error": "Diese Datei ist kein Betreuungsplan-Backup"}), 400
-    if payload.get("version") != 1:
+    if payload.get("version") not in {1, 2}:
         return jsonify({"error": f"Nicht unterstützte Backup-Version: {payload.get('version')}"}), 400
 
     people = payload.get("people")
     entries = payload.get("entries")
     periods = payload.get("periods")
-    if not isinstance(people, list) or not isinstance(entries, list) or not isinstance(periods, list):
+    subscriptions = payload.get("calendar_subscriptions", [])
+    if not isinstance(people, list) or not isinstance(entries, list) or not isinstance(periods, list) or not isinstance(subscriptions, list):
         return jsonify({"error": "Backup ist unvollständig"}), 400
     if not people:
         return jsonify({"error": "Backup enthält keine Betreuungspersonen"}), 400
@@ -1657,7 +1918,7 @@ def import_data_json():
             sort_order = int(item.get("sort_order", (idx + 1) * 10))
         except (TypeError, ValueError):
             sort_order = (idx + 1) * 10
-        normalized_people.append((name, valid_color(item.get("color"), "#ececec"), sort_order, str(item.get("ical_title", "")).strip()[:80]))
+        normalized_people.append((name, valid_color(item.get("color"), "#ececec"), sort_order, str(item.get("ical_title", "")).strip()[:80], str(item.get("calendar_token") or secrets.token_urlsafe(32))))
 
     normalized_entries = []
     seen_days = set()
@@ -1707,6 +1968,26 @@ def import_data_json():
             str(item.get("created_at") or now), str(item.get("updated_at") or now),
         ))
 
+    normalized_subscriptions = []
+    for idx, item in enumerate(subscriptions):
+        if not isinstance(item, dict):
+            return jsonify({"error": f"Ungültiges Kalender-Abo an Position {idx + 1}"}), 400
+        name = str(item.get("name", "")).strip()
+        url = str(item.get("url", "")).strip()
+        if not name or not url:
+            continue
+        safe, error = _subscription_url_is_safe(url)
+        if not safe:
+            return jsonify({"error": f"Kalender-Abo {name}: {error}"}), 400
+        kind = str(item.get("kind", "holiday")).strip() or "holiday"
+        default_color = "#d65a6f" if kind == "holiday" else "#f2a65a" if kind == "vacation" else "#80a4c2"
+        now = datetime.now().isoformat(timespec="seconds")
+        normalized_subscriptions.append((
+            name, url, kind, valid_color(item.get("color"), default_color), 1 if item.get("enabled", True) else 0,
+            str(item.get("last_sync_at", "")), str(item.get("last_status", "")),
+            str(item.get("created_at") or now), str(item.get("updated_at") or now),
+        ))
+
     # Always save the current database before destructive restore.
     backup_db("before-full-import")
     try:
@@ -1715,8 +1996,9 @@ def import_data_json():
             conn.execute("DELETE FROM entries")
             conn.execute("DELETE FROM periods")
             conn.execute("DELETE FROM people")
+            conn.execute("DELETE FROM calendar_subscriptions")
             conn.executemany(
-                "INSERT INTO people(name,color,sort_order,ical_title) VALUES(?,?,?,?)",
+                "INSERT INTO people(name,color,sort_order,ical_title,calendar_token) VALUES(?,?,?,?,?)",
                 normalized_people,
             )
             person_ids = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM people").fetchall()}
@@ -1731,15 +2013,22 @@ def import_data_json():
                    VALUES(?,?,?,?,?,?,?,?,?)""",
                 normalized_periods,
             )
+            conn.executemany(
+                """INSERT INTO calendar_subscriptions(name,url,kind,color,enabled,last_sync_at,last_status,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""", normalized_subscriptions
+            )
     except sqlite3.Error as exc:
         return jsonify({"error": f"Import fehlgeschlagen: {exc}"}), 400
 
     backup_db("after-full-import")
+    if normalized_subscriptions:
+        threading.Thread(target=sync_all_calendar_subscriptions, name="calendar-subscriptions-restore", daemon=True).start()
     return jsonify({
         "ok": True,
         "people": len(normalized_people),
         "entries": len(normalized_entries),
         "periods": len(normalized_periods),
+        "calendar_subscriptions": len(normalized_subscriptions),
     })
 
 
@@ -1826,65 +2115,29 @@ def entry_ics_export(entry_id):
 
 @app.get("/calendar.ics")
 def calendar_ics():
-    person = request.args.get("person", "").strip()
-    supplied_token = request.args.get("token", "")
-
-    if not ICAL_TOKEN:
-        return Response("Not found", status=404)
-
-    # The global token remains valid for the complete feed and for backwards
-    # compatibility. Person-specific links use a derived token, so sharing one
-    # person's URL does not grant access to other people's feeds.
-    valid_global = hmac.compare_digest(supplied_token, ICAL_TOKEN)
-    valid_person = bool(person) and hmac.compare_digest(
-        supplied_token, person_ical_token(person)
-    )
-    if not (valid_global or valid_person):
-        return Response("Not found", status=404)
-
-    if person:
-        rows = entry_rows("p.name = ?", (person,))
-        with db() as conn:
-            exists = conn.execute("SELECT 1 FROM people WHERE name = ?", (person,)).fetchone()
-        if not exists:
+    token = request.args.get("token", "")
+    person_id_raw = request.args.get("person_id", "").strip()
+    person_row = None
+    if person_id_raw:
+        try:
+            person_id = int(person_id_raw)
+        except ValueError:
             return Response("Not found", status=404)
+        with db() as conn:
+            person_row = conn.execute("SELECT id,name,calendar_token FROM people WHERE id=?", (person_id,)).fetchone()
+        if not person_row or not hmac.compare_digest(token, person_row["calendar_token"]):
+            return Response("Not found", status=404)
+        rows = entry_rows("p.id = ?", (person_id,))
     else:
+        if not ICAL_TOKEN or not hmac.compare_digest(token, ICAL_TOKEN):
+            return Response("Not found", status=404)
         rows = entry_rows()
 
     host = request.host.split(":")[0]
-    calendar_name = f"{APP_TITLE} – {person}" if person else APP_TITLE
-    body = build_ics_calendar(rows, host, calendar_name)
+    cal_name = f"{APP_TITLE} – {person_row['name']}" if person_row else APP_TITLE
+    body = build_ics_calendar(rows, host, cal_name)
     return Response(body, mimetype="text/calendar; charset=utf-8")
 
-
-@app.get("/api/history")
-@login_required
-def api_history():
-    with db() as conn:
-        rows=conn.execute("SELECT id,action,entry_id,snapshot,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
-    out=[]
-    for r in rows:
-        x=dict(r); x["snapshot"]=json.loads(x["snapshot"] or "{}")
-        out.append(x)
-    return jsonify(out)
-
-@app.post("/api/history/<int:history_id>/restore")
-@login_required
-def api_history_restore(history_id):
-    with db() as conn:
-        h=conn.execute("SELECT * FROM history WHERE id=?",(history_id,)).fetchone()
-    if not h or h["action"]!="deleted": return jsonify({"error":"Dieser Eintrag kann nicht wiederhergestellt werden"}),400
-    snap=json.loads(h["snapshot"] or "{}")
-    if not snap.get("day") or not snap.get("person_id"): return jsonify({"error":"Unvollständiger Verlaufseintrag"}),400
-    now=datetime.now().isoformat(timespec="seconds")
-    try:
-        with db() as conn:
-            cur=conn.execute("INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",(snap["day"],snap["person_id"],snap.get("note","") ,snap.get("all_day",1),snap.get("start_time","") ,snap.get("end_time","") ,now,now))
-            eid=cur.lastrowid
-        history_add("restored",entry_snapshot(eid),eid); backup_db("entry-restore")
-        return jsonify({"ok":True,"id":eid})
-    except sqlite3.IntegrityError:
-        return jsonify({"error":"Für dieses Datum gibt es bereits einen Eintrag"}),409
 
 @app.get("/api/stats")
 @login_required
@@ -1906,3 +2159,8 @@ def api_stats():
             ).fetchall()
         ]
     return jsonify({"year": year, "total": total, "per_person": per_person})
+
+
+# Background calendar subscription synchronization (single gunicorn worker in the provided Dockerfile).
+subscription_worker_started = threading.Thread(target=calendar_subscription_worker, name="calendar-subscriptions", daemon=True)
+subscription_worker_started.start()

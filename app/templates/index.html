@@ -42,6 +42,7 @@
         <h3>Schnell eintragen</h3>
         <label class="label">Datum</label>
         <input id="quickDate" class="input" type="date"/>
+        <div id="quickDateContext" class="date-context"></div>
         <div class="space"></div>
         <div class="timing-control">
           <label class="all-day-toggle"><input id="quickAllDay" type="checkbox" checked><span>Ganztägig</span></label>
@@ -161,6 +162,24 @@
         <div id="periodList" class="period-list topgap"></div>
 
         <hr class="separator">
+        <h3>Kalender-Abos</h3>
+        <p class="small">Automatisch aktualisierte Ferien- oder Feiertagskalender. Öffentliche oder geheime HTTPS-.ics-URLs werden standardmäßig alle 12 Stunden synchronisiert.</p>
+        <div class="subscription-form topgap">
+          <input id="subName" class="input" placeholder="Name, z. B. Feiertage Zürich">
+          <input id="subUrl" class="input" type="url" inputmode="url" autocomplete="off" placeholder="https://…/kalender.ics">
+          <div class="row">
+            <select id="subKind" class="input">
+              <option value="holiday">Feiertage</option>
+              <option value="vacation">Ferien</option>
+              <option value="other">Andere Termine</option>
+            </select>
+            <input id="subColor" class="color" type="color" value="#d65a6f">
+            <button id="addSubscription" class="secondary" type="button">Abo hinzufügen</button>
+          </div>
+        </div>
+        <div id="subscriptionList" class="subscription-list topgap"></div>
+
+        <hr class="separator">
         <h3>Feiertagskalender importieren</h3>
         <p class="small">Importiert ganztägige Termine aus einer iCalendar-Datei (.ics). Beim erneuten Import werden Termine mit derselben UID aktualisiert.</p>
         <form id="icsImportForm" class="topgap">
@@ -182,10 +201,12 @@
         <div id="icalBox" class="pathbox">Nicht aktiviert.</div>
         <div class="row topgap">
           <button id="copyIcal" class="secondary" style="display:none">Link kopieren</button>
+          <button id="showGlobalQr" class="secondary" style="display:none" type="button">QR-Code</button>
           <a id="subscribeIcal" class="secondary link-button" style="display:none">Auf iPhone abonnieren</a>
         </div>
+        <div id="globalQrBox" class="qr-box" style="display:none"><img id="globalQrImage" alt="QR-Code Gesamtkalender"></div>
         <div id="icalPersonList" class="ical-person-list topgap"></div>
-        <p id="icalSecurityHint" class="small topgap" style="display:none">Jeder Personen-Link hat einen eigenen abgeleiteten Token. Wer z. B. nur diesen Link erhält, kann den Parameter nicht einfach auf eine andere Person ändern.</p>
+        <p id="icalSecurityHint" class="small topgap" style="display:none">Jede Person hat einen eigenen widerrufbaren Kalender-Schlüssel. „Freigabe widerrufen“ macht nur diesen einen Link ungültig; alle anderen Kalender bleiben unverändert.</p>
         <hr class="separator">
         <label class="label" for="icalTitleTemplate">Titel der Kalendereinträge</label>
         <input id="icalTitleTemplate" class="input" value="{person}" placeholder="z. B. Betreuung – {person}">
@@ -242,6 +263,7 @@
     <div class="row"><h3 id="modalTitle">Betreuung eintragen</h3><span class="spacer"></span><button class="close" onclick="closeModal()">✕</button></div>
     <label class="label">Datum</label>
     <input id="modalDate" class="input" type="date"/>
+    <div id="modalDateContext" class="date-context"></div>
     <div class="space"></div>
     <div class="timing-control">
       <label class="all-day-toggle"><input id="modalAllDay" type="checkbox" checked><span>Ganztägig</span></label>

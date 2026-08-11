@@ -130,3 +130,19 @@ Hinweis: Zeitangaben im iCal werden aktuell als lokale („floating“) Uhrzeite
 
 ## v23 – Zeitfelder
 - Von/Bis auf iPhone als sauberes Zwei-Spalten-Layout mit Beschriftungen oberhalb der Zeitfelder.
+
+
+## Kalender-Abos für Ferien / Feiertage
+
+Unter **Setup → Ferien & Feiertage → Kalender-Abos** können HTTPS-iCalendar-URLs hinterlegt werden. Die App synchronisiert aktive Abos standardmäßig alle 12 Stunden und speichert die Termine lokal, damit sie auch bei einem vorübergehend nicht erreichbaren Feed sichtbar bleiben.
+
+Optional im Stack:
+
+```text
+SUBSCRIPTION_SYNC_HOURS=12
+ALLOW_HTTP_CALENDAR_SUBSCRIPTIONS=false
+```
+
+Aus Sicherheitsgründen blockiert der Server bei Kalender-Abos private, lokale und Link-Local-Zieladressen. HTTP ist standardmäßig deaktiviert; öffentliche HTTPS-Feeds sind empfohlen.
+
+Personen-Kalender verwenden ab v30 jeweils einen eigenen zufälligen, widerrufbaren Schlüssel. Ein Widerruf betrifft nur die gewählte Person.

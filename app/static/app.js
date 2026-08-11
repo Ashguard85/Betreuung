@@ -1,6 +1,7 @@
 let people = [];
 let entries = [];
 let periods = [];
+let calendarSubscriptions = [];
 let selectedQuick = null;
 let selectedModal = null;
 let selectedBatch = null;
@@ -157,6 +158,12 @@ async function loadPeriods(){
   periods = await api("/api/periods");
   renderPeriodSettings();
   renderYear();
+  updateDateContext("quick");
+  updateDateContext("modal");
+}
+async function loadCalendarSubscriptions(){
+  calendarSubscriptions = await api("/api/calendar-subscriptions");
+  renderCalendarSubscriptions();
 }
 
 function renderPersonButtons(target, mode){
@@ -364,6 +371,19 @@ function renderStats(){
   qs("#statPeople").textContent=new Set(entries.map(e=>e.person)).size;
   qs("#statYear").textContent=entries.filter(e=>e.day.startsWith(year)).length;
 }
+function periodsForDay(day){
+  if(!day) return [];
+  return periods.filter(p=>p.start_day<=day && p.end_day>=day);
+}
+function updateDateContext(prefix){
+  const input=qs(`#${prefix}Date`);
+  const box=qs(`#${prefix}DateContext`);
+  if(!input || !box) return;
+  const matches=periodsForDay(input.value);
+  if(!matches.length){box.innerHTML="";box.classList.remove("visible");return;}
+  box.innerHTML=matches.map(p=>`<div class="date-context-item"><i class="bar-swatch" style="background:${esc(p.color)}"></i><span><b>${esc(periodKindName(p.kind))}:</b> ${esc(p.label)}</span></div>`).join("");
+  box.classList.add("visible");
+}
 function periodKindName(kind){
   return kind==="vacation" ? "Ferien" : kind==="holiday" ? "Feiertag" : "Zeitraum";
 }
@@ -453,6 +473,7 @@ function openModal(id=null){
   qs("#modalTitle").textContent=e?"Eintrag bearbeiten":"Betreuung eintragen";
   qs("#modalDate").value=e?e.day:(qs("#quickDate").value||isoToday());
   syncDateShell(qs("#modalDate"));
+  updateDateContext("modal");
   qs("#modalNote").value=e?e.note:"";
   setTiming("modal",e);
   selectedModal=e?e.person_id:(people[0]?.id||null);
@@ -463,7 +484,7 @@ function openModal(id=null){
   qs("#modalBack").classList.add("open");
 }
 function closeModal(){qs("#modalBack").classList.remove("open");editingId=null;}
-function prefillDate(day){openModal();qs("#modalDate").value=day;syncDateShell(qs("#modalDate"));}
+function prefillDate(day){openModal();qs("#modalDate").value=day;syncDateShell(qs("#modalDate"));updateDateContext("modal");}
 
 function formatIsoDate(day){
   if(!day) return "";
@@ -575,7 +596,8 @@ async function deletePerson(id){
 function renderPeriodSettings(){
   const box=qs("#periodList");
   if(!box) return;
-  box.innerHTML=periods.length?periods.map(p=>{
+  const listedPeriods=periods.filter(p=>!String(p.source||"").startsWith("subscription:"));
+  box.innerHTML=listedPeriods.length?listedPeriods.map(p=>{
     const same=p.start_day===p.end_day;
     const range=same?p.start_day:`${p.start_day} - ${p.end_day}`;
     return `<div class="period-item"><span class="bar-swatch large" style="background:${esc(p.color)}"></span><div><b>${esc(p.label)}</b><div class="small">${periodKindName(p.kind)} · ${esc(range)}${p.source==="ics"?" · ICS":""}</div></div><button class="mini danger" onclick="deletePeriod(${p.id})">×</button></div>`;
@@ -613,6 +635,49 @@ async function copyCalendarUrl(url, label="Kalenderlink"){
     toast("Link markieren und kopieren");
   }
 }
+function renderCalendarSubscriptions(){
+  const box=qs("#subscriptionList"); if(!box) return;
+  box.innerHTML=calendarSubscriptions.length?calendarSubscriptions.map(sub=>{
+    const ok=(sub.last_status||"").startsWith("OK");
+    return `<div class="subscription-item">
+      <div class="subscription-item-head"><i class="bar-swatch large" style="background:${esc(sub.color)}"></i><div class="spacer"><b>${esc(sub.name)}</b><div class="subscription-url">${esc(sub.url)}</div></div><label class="toggle-row"><input class="sub-enabled" type="checkbox" data-id="${sub.id}" ${Number(sub.enabled)?"checked":""}> aktiv</label></div>
+      <div class="subscription-status ${ok?"":"danger"}">${esc(sub.last_status||"Noch nicht synchronisiert")}${sub.last_sync_at?` · ${esc(new Date(sub.last_sync_at).toLocaleString("de-CH"))}`:""}</div>
+      <div class="subscription-item-actions"><button class="secondary sub-sync" data-id="${sub.id}" type="button">Jetzt aktualisieren</button><button class="secondary danger sub-delete" data-id="${sub.id}" type="button">Löschen</button></div>
+    </div>`;
+  }).join(""):'<div class="small">Noch keine Kalender-Abos eingerichtet.</div>';
+  qsa(".sub-sync").forEach(btn=>btn.addEventListener("click",()=>syncSubscription(Number(btn.dataset.id))));
+  qsa(".sub-delete").forEach(btn=>btn.addEventListener("click",()=>deleteSubscription(Number(btn.dataset.id))));
+  qsa(".sub-enabled").forEach(chk=>chk.addEventListener("change",()=>toggleSubscription(Number(chk.dataset.id),chk.checked)));
+  applyOnlineState();
+}
+async function addSubscription(){
+  const payload={name:qs("#subName").value.trim(),url:qs("#subUrl").value.trim(),kind:qs("#subKind").value,color:qs("#subColor").value};
+  if(!payload.name||!payload.url) return toast("Name und Kalender-URL eingeben");
+  try{
+    const result=await api("/api/calendar-subscriptions",{method:"POST",body:JSON.stringify(payload)});
+    qs("#subName").value="";qs("#subUrl").value="";
+    await loadCalendarSubscriptions(); await loadPeriods();
+    toast(result.warning?`Abo gespeichert · Sync: ${result.warning}`:`Abo gespeichert · ${result.imported||0} Termine`);
+  }catch(e){toast(e.message);}
+}
+async function syncSubscription(id){
+  try{const r=await api(`/api/calendar-subscriptions/${id}/sync`,{method:"POST",body:"{}"});await loadCalendarSubscriptions();await loadPeriods();toast(`${r.imported||0} Termine aktualisiert`);}catch(e){await loadCalendarSubscriptions();toast(e.message);}
+}
+async function toggleSubscription(id,enabled){
+  const sub=calendarSubscriptions.find(x=>Number(x.id)===Number(id)); if(!sub) return;
+  try{await api(`/api/calendar-subscriptions/${id}`,{method:"PUT",body:JSON.stringify({...sub,enabled})});await loadCalendarSubscriptions();await loadPeriods();toast(enabled?"Abo aktiviert":"Abo deaktiviert");}catch(e){toast(e.message);}
+}
+async function deleteSubscription(id){
+  if(!confirm("Kalender-Abo und seine synchronisierten Markierungen löschen?")) return;
+  try{await api(`/api/calendar-subscriptions/${id}`,{method:"DELETE"});await loadCalendarSubscriptions();await loadPeriods();toast("Kalender-Abo gelöscht");}catch(e){toast(e.message);}
+}
+function toggleQrBox(boxId,imgId,url){
+  const box=qs(boxId), img=qs(imgId); if(!box||!img) return;
+  const show=box.style.display==="none"||!box.style.display;
+  box.style.display=show?"block":"none";
+  if(show && !img.src) img.src=url+`?v=${Date.now()}`;
+}
+
 function renderPersonIcalFeeds(items=[]){
   const box=qs("#icalPersonList");
   if(!box) return;
@@ -621,12 +686,20 @@ function renderPersonIcalFeeds(items=[]){
     <div class="ical-feed">
       <div class="ical-feed-head"><span class="dot" style="background:${esc(item.color||"#ececec")}"></span><b>${esc(item.name)}</b></div>
       <div class="pathbox compact">${esc(item.url)}</div>
-      <div class="row topgap">
+      <div class="ical-feed-actions">
         <button class="secondary ical-copy" type="button" data-url="${esc(item.url)}" data-name="${esc(item.name)}">Link kopieren</button>
         <a class="secondary link-button" href="${esc(webcalUrl(item.url))}">Auf iPhone abonnieren</a>
+        <button class="secondary person-qr" type="button" data-id="${item.id}">QR-Code</button>
+        <button class="secondary danger person-revoke" type="button" data-id="${item.id}" data-name="${esc(item.name)}">Freigabe widerrufen</button>
       </div>
+      <div id="personQrBox-${item.id}" class="qr-box" style="display:none"><img id="personQrImage-${item.id}" alt="QR-Code ${esc(item.name)}"></div>
     </div>`).join("");
   qsa(".ical-copy").forEach(btn=>btn.addEventListener("click",()=>copyCalendarUrl(btn.dataset.url,`${btn.dataset.name}-Link`)));
+  qsa(".person-qr").forEach(btn=>btn.addEventListener("click",()=>toggleQrBox(`#personQrBox-${btn.dataset.id}`,`#personQrImage-${btn.dataset.id}`,`/api/people/${btn.dataset.id}/calendar-qr.png`)));
+  qsa(".person-revoke").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm(`Freigabe für ${btn.dataset.name} widerrufen? Der bisherige Kalender-Link funktioniert danach sofort nicht mehr.`)) return;
+    try{await api(`/api/people/${btn.dataset.id}/calendar-token/reset`,{method:"POST",body:"{}"});await loadConfig();toast("Freigabe widerrufen · neuen Link weitergeben");}catch(e){toast(e.message);}
+  }));
 }
 async function loadConfig(){
   const c=await api("/api/config");
@@ -635,6 +708,8 @@ async function loadConfig(){
     qs("#icalBox").textContent=c.ical_url;
     qs("#copyIcal").style.display="";
     qs("#copyIcal").dataset.url=c.ical_url;
+    qs("#showGlobalQr").style.display="";
+    qs("#showGlobalQr").dataset.url=c.ical_qr_url||"/api/calendar-qr.png";
     qs("#subscribeIcal").style.display="";
     qs("#subscribeIcal").href=webcalUrl(c.ical_url);
     qs("#icalSecurityHint").style.display="";
@@ -642,6 +717,8 @@ async function loadConfig(){
   }else{
     qs("#icalBox").textContent="Nicht aktiviert. In Portainer ICAL_TOKEN setzen.";
     qs("#copyIcal").style.display="none";
+    qs("#showGlobalQr").style.display="none";
+    qs("#globalQrBox").style.display="none";
     qs("#subscribeIcal").style.display="none";
     qs("#icalSecurityHint").style.display="none";
     renderPersonIcalFeeds([]);
@@ -744,7 +821,7 @@ function applyOnlineState(){
   ["#quickSave","#modalSave","#modalDuplicate","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!online;
   });
-  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
+  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#subName,#subUrl,#subKind,#subColor,#addSubscription,#subscriptionList button,#subscriptionList input,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
   const batchCreate=qs("#batchCreate");
   if(batchCreate) batchCreate.disabled=!online || !batchPreviewKey;
   qsa(".server-export").forEach(el=>{
@@ -804,6 +881,8 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   upgradeTimeInputs();
   qs("#quickDate").value=isoToday();
   syncDateShell(qs("#quickDate"));
+  qs("#quickDate").addEventListener("change",()=>updateDateContext("quick"));
+  qs("#modalDate").addEventListener("change",()=>updateDateContext("modal"));
   setTiming("quick");
   ["quick","modal","batch"].forEach(prefix=>{
     qs(`#${prefix}AllDay`)?.addEventListener("change",()=>{
@@ -885,6 +964,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     }catch(e){toast(e.message);}
   });
   qs("#copyIcal").addEventListener("click",()=>copyCalendarUrl(qs("#copyIcal").dataset.url));
+  qs("#showGlobalQr").addEventListener("click",()=>toggleQrBox("#globalQrBox","#globalQrImage",qs("#showGlobalQr").dataset.url||"/api/calendar-qr.png"));
   qs("#periodStart").value=isoToday();
   qs("#periodEnd").value=isoToday();
   syncDateShell(qs("#periodStart"));
@@ -893,6 +973,8 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#periodKind").addEventListener("change",()=>{
     qs("#periodColor").value=qs("#periodKind").value==="holiday"?"#d65a6f":qs("#periodKind").value==="vacation"?"#f2a65a":"#80a4c2";
   });
+  qs("#addSubscription").addEventListener("click",addSubscription);
+  qs("#subKind").addEventListener("change",()=>{qs("#subColor").value=qs("#subKind").value==="holiday"?"#d65a6f":qs("#subKind").value==="vacation"?"#f2a65a":"#80a4c2";});
   qs("#icsImportForm").addEventListener("submit",async(e)=>{
     e.preventDefault();
     if(!navigator.onLine) return toast("ICS Import benötigt eine Serververbindung");
@@ -924,9 +1006,9 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       const res=await fetch("/import-data.json",{method:"POST",body:fd});
       const data=await res.json();
       if(!res.ok) throw new Error(data.error||"Import fehlgeschlagen");
-      await loadPeople(); await loadEntries(); await loadPeriods(); await loadConfig();
+      await loadPeople(); await loadEntries(); await loadPeriods(); await loadCalendarSubscriptions(); await loadConfig();
       e.target.reset();
-      toast(`${data.people} Personen, ${data.entries} Einträge, ${data.periods} Zeiträume wiederhergestellt`);
+      toast(`${data.people} Personen, ${data.entries} Einträge, ${data.periods} Zeiträume, ${data.calendar_subscriptions||0} Abos wiederhergestellt`);
     }catch(err){toast(err.message);}
   });
 
@@ -946,6 +1028,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   try{await loadPeople();}catch(e){toast(e.message);}
   try{await loadEntries();}catch(e){toast(e.message);}
   try{await loadPeriods();}catch(e){toast(e.message);}
+  try{await loadCalendarSubscriptions();}catch(e){if(navigator.onLine) toast(e.message);}
   try{await loadConfig();}catch(e){if(navigator.onLine) toast(e.message);}
   applyOnlineState();
 });

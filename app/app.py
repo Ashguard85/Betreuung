@@ -191,7 +191,8 @@ def init_db():
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL UNIQUE,
           color TEXT NOT NULL DEFAULT '#ececec',
-          sort_order INTEGER NOT NULL DEFAULT 100
+          sort_order INTEGER NOT NULL DEFAULT 100,
+          ical_title TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS entries (
@@ -246,6 +247,9 @@ def init_db():
             conn.execute("ALTER TABLE entries ADD COLUMN start_time TEXT NOT NULL DEFAULT ''")
         if "end_time" not in entry_columns:
             conn.execute("ALTER TABLE entries ADD COLUMN end_time TEXT NOT NULL DEFAULT ''")
+        people_columns = {r["name"] for r in conn.execute("PRAGMA table_info(people)").fetchall()}
+        if "ical_title" not in people_columns:
+            conn.execute("ALTER TABLE people ADD COLUMN ical_title TEXT NOT NULL DEFAULT ''")
 
         existing = conn.execute("SELECT COUNT(*) AS c FROM people").fetchone()["c"]
         if existing == 0:
@@ -510,10 +514,10 @@ def api_config():
     if ICAL_TOKEN:
         with db() as conn:
             rows = conn.execute(
-                "SELECT name,color FROM people ORDER BY sort_order,name"
+                "SELECT name,color,ical_title FROM people ORDER BY sort_order,name"
             ).fetchall()
         person_urls = [
-            {"name": r["name"], "color": r["color"], "url": ical_feed_url(r["name"])}
+            {"name": r["name"], "color": r["color"], "ical_title": r["ical_title"], "url": ical_feed_url(r["name"])}
             for r in rows
         ]
     return jsonify({
@@ -543,7 +547,7 @@ def api_config_update():
 def api_people():
     with db() as conn:
         rows = conn.execute(
-            "SELECT id,name,color,sort_order FROM people ORDER BY sort_order,name"
+            "SELECT id,name,color,sort_order,ical_title FROM people ORDER BY sort_order,name"
         ).fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -554,6 +558,9 @@ def api_people_add():
     payload = request.get_json(force=True)
     name = str(payload.get("name", "")).strip()
     color = str(payload.get("color", "#ececec")).strip()
+    ical_title = str(payload.get("ical_title", "")).strip()
+    if len(ical_title) > 80:
+        return jsonify({"error": "Persönlicher Kalendertitel darf maximal 80 Zeichen lang sein"}), 400
     if not name:
         return jsonify({"error": "Name fehlt"}), 400
     if not color.startswith("#") or len(color) not in (4, 7):
@@ -578,13 +585,16 @@ def api_people_update(person_id):
     payload = request.get_json(force=True)
     name = str(payload.get("name", "")).strip()
     color = str(payload.get("color", "#ececec")).strip()
+    ical_title = str(payload.get("ical_title", "")).strip()
+    if len(ical_title) > 80:
+        return jsonify({"error": "Persönlicher Kalendertitel darf maximal 80 Zeichen lang sein"}), 400
     if not name:
         return jsonify({"error": "Name fehlt"}), 400
     try:
         with db() as conn:
             conn.execute(
-                "UPDATE people SET name=?,color=? WHERE id=?",
-                (name, color, person_id),
+                "UPDATE people SET name=?,color=?,ical_title=? WHERE id=?",
+                (name, color, ical_title, person_id),
             )
         backup_db("person-update")
         return jsonify({"ok": True})
@@ -1575,7 +1585,7 @@ def export_data_json():
     """Portable full backup of all user-managed application data."""
     with db() as conn:
         people = [dict(r) for r in conn.execute(
-            "SELECT name,color,sort_order FROM people ORDER BY sort_order,name"
+            "SELECT name,color,sort_order,ical_title FROM people ORDER BY sort_order,name"
         ).fetchall()]
         entries = [dict(r) for r in conn.execute(
             """SELECT e.day,p.name AS person,e.note,e.all_day,e.start_time,e.end_time,e.created_at,e.updated_at
@@ -1647,7 +1657,7 @@ def import_data_json():
             sort_order = int(item.get("sort_order", (idx + 1) * 10))
         except (TypeError, ValueError):
             sort_order = (idx + 1) * 10
-        normalized_people.append((name, valid_color(item.get("color"), "#ececec"), sort_order))
+        normalized_people.append((name, valid_color(item.get("color"), "#ececec"), sort_order, str(item.get("ical_title", "")).strip()[:80]))
 
     normalized_entries = []
     seen_days = set()
@@ -1706,7 +1716,7 @@ def import_data_json():
             conn.execute("DELETE FROM periods")
             conn.execute("DELETE FROM people")
             conn.executemany(
-                "INSERT INTO people(name,color,sort_order) VALUES(?,?,?)",
+                "INSERT INTO people(name,color,sort_order,ical_title) VALUES(?,?,?,?)",
                 normalized_people,
             )
             person_ids = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM people").fetchall()}
@@ -1731,6 +1741,16 @@ def import_data_json():
         "entries": len(normalized_entries),
         "periods": len(normalized_periods),
     })
+
+
+def ical_event_title(r):
+    """Resolve per-person iCal title first, then fall back to the global template."""
+    person = str(r["person"])
+    with db() as conn:
+        row = conn.execute("SELECT ical_title FROM people WHERE name=?", (person,)).fetchone()
+    custom = str(row["ical_title"] if row else "").strip()
+    template = custom or get_setting("ical_title_template", "{person}")
+    return template.replace("{person}", person).replace("{app}", APP_TITLE)
 
 
 def entry_ics_event_lines(r, host):
@@ -1759,7 +1779,7 @@ def entry_ics_event_lines(r, host):
             f"DTEND:{end_day_compact}T{end_compact}00",
         ])
     lines.extend([
-        f"SUMMARY:{ics_escape(get_setting('ical_title_template','{person}').replace('{person}', str(r['person'])).replace('{app}', APP_TITLE))}",
+        f"SUMMARY:{ics_escape(ical_event_title(r))}",
         f"DESCRIPTION:{ics_escape(r['note'])}",
         "CATEGORIES:Betreuung",
         "STATUS:CONFIRMED",

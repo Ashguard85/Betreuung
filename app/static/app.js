@@ -557,13 +557,13 @@ function renderPeopleSettings(){
   qs("#peopleSettings").innerHTML=people.map(p=>`
     <div class="person-setting">
       <input type="color" class="color" value="${esc(p.color)}" onchange="updatePerson(${p.id})" id="pc-${p.id}">
-      <input class="name" value="${esc(p.name)}" id="pn-${p.id}" onchange="updatePerson(${p.id})">
+      <div class="person-setting-fields"><input class="name" value="${esc(p.name)}" id="pn-${p.id}" onchange="updatePerson(${p.id})"><input class="person-ical-title" value="${esc(p.ical_title||"")}" id="pit-${p.id}" onchange="updatePerson(${p.id})" placeholder="iCal-Titel (optional)"></div>
       <button class="mini danger" onclick="deletePerson(${p.id})">×</button>
     </div>`).join("");
 }
 async function updatePerson(id){
   try{
-    await api(`/api/people/${id}`,{method:"PUT",body:JSON.stringify({name:qs(`#pn-${id}`).value,color:qs(`#pc-${id}`).value})});
+    await api(`/api/people/${id}`,{method:"PUT",body:JSON.stringify({name:qs(`#pn-${id}`).value,color:qs(`#pc-${id}`).value,ical_title:qs(`#pit-${id}`).value})});
     await loadPeople(); await loadEntries(); toast("Person aktualisiert");
   }catch(e){toast(e.message);}
 }

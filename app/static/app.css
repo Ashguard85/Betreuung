@@ -429,3 +429,5 @@ body.modal-open{overflow:hidden}
   textarea.input{min-height:70px}
   .history-item{align-items:flex-start}.history-item .small{line-height:1.25}
 }
+
+.person-setting-fields{display:grid;grid-template-columns:1fr;gap:5px;min-width:0;flex:1}.person-setting-fields .name,.person-setting-fields .person-ical-title{width:100%;min-width:0;box-sizing:border-box}.person-ical-title{font-size:13px;padding:7px 9px}

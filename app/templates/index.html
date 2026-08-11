@@ -122,10 +122,11 @@
         <summary>Betreuungspersonen</summary>
         <div class="settings-disclosure-body">
           <div id="peopleSettings" class="people-settings"></div>
-          <div class="row topgap">
-            <input id="newPerson" class="input" placeholder="Neue Person">
-            <input id="newColor" type="color" value="#e8e8e8" class="color">
-            <button class="secondary" id="addPerson">+</button>
+          <div class="person-add-row topgap">
+            <span class="person-add-label">Neue Person</span>
+            <input id="newPerson" class="input" placeholder="Name">
+            <input id="newColor" type="color" value="#e8e8e8" class="color" aria-label="Farbe">
+            <button class="secondary person-add-button" id="addPerson" type="button">Hinzufügen</button>
           </div>
         </div>
       </details>
@@ -377,7 +378,22 @@
   </div>
 </div>
 
+<div id="personEditorBack" class="modalback person-editor-back" onclick="if(event.target===this)closePersonEditor()">
+  <div class="modal person-editor-modal" role="dialog" aria-modal="true" aria-labelledby="personEditorTitle">
+    <div class="row person-editor-head"><h3 id="personEditorTitle">Betreuungsperson bearbeiten</h3><span class="spacer"></span><button class="close" type="button" onclick="closePersonEditor()">✕</button></div>
+    <input id="personEditId" type="hidden">
+    <label class="label" for="personEditName">Name</label>
+    <input id="personEditName" class="input" autocomplete="off">
+    <div class="person-editor-color-row">
+      <div><label class="label" for="personEditColor">Farbe</label><input id="personEditColor" type="color" class="color person-editor-color"></div>
+      <div class="person-editor-title-field"><label class="label" for="personEditIcalTitle">Eigener Kalendertitel <span class="small">(optional)</span></label><input id="personEditIcalTitle" class="input" placeholder="z. B. Noemi bei Vreni"></div>
+    </div>
+    <p class="small person-editor-hint">Leer lassen = globalen Kalendertitel verwenden.</p>
+    <button id="personEditorSave" class="primary" type="button">Speichern</button>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=32"></script>
+<script src="/static/app.js?v=34"></script>
 </body>
 </html>

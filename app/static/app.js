@@ -575,16 +575,39 @@ async function saveEntry(day,personId,note,timing,id=null){
 }
 
 function renderPeopleSettings(){
-  qs("#peopleSettings").innerHTML=people.map(p=>`
-    <div class="person-setting">
-      <input type="color" class="color" value="${esc(p.color)}" onchange="updatePerson(${p.id})" id="pc-${p.id}">
-      <div class="person-setting-fields"><input class="name" value="${esc(p.name)}" id="pn-${p.id}" onchange="updatePerson(${p.id})"><input class="person-ical-title" value="${esc(p.ical_title||"")}" id="pit-${p.id}" onchange="updatePerson(${p.id})" placeholder="iCal-Titel (optional)"></div>
-      <button class="mini danger" onclick="deletePerson(${p.id})">×</button>
-    </div>`).join("");
+  qs("#peopleSettings").innerHTML=people.map(p=>{
+    const subtitle=p.ical_title?esc(p.ical_title):'<span class="person-title-default">globaler Kalendertitel</span>';
+    return `<div class="person-compact-card">
+      <button class="person-compact-main" type="button" onclick="openPersonEditor(${p.id})" aria-label="${esc(p.name)} bearbeiten">
+        <span class="person-color-dot" style="background:${esc(p.color)}"></span>
+        <span class="person-compact-text"><strong>${esc(p.name)}</strong><small>${subtitle}</small></span>
+        <span class="person-edit-mark">Bearbeiten</span>
+      </button>
+      <button class="person-delete-btn" type="button" onclick="event.stopPropagation();deletePerson(${p.id})" aria-label="${esc(p.name)} löschen">×</button>
+    </div>`;
+  }).join("");
 }
-async function updatePerson(id){
+function openPersonEditor(id){
+  const p=people.find(x=>Number(x.id)===Number(id));
+  if(!p)return;
+  qs("#personEditId").value=p.id;
+  qs("#personEditName").value=p.name||"";
+  qs("#personEditColor").value=p.color||"#ececec";
+  qs("#personEditIcalTitle").value=p.ical_title||"";
+  qs("#personEditorBack").classList.add("open");
+  document.body.classList.add("modal-open");
+}
+function closePersonEditor(){
+  qs("#personEditorBack").classList.remove("open");
+  document.body.classList.remove("modal-open");
+}
+async function savePersonEditor(){
+  const id=Number(qs("#personEditId").value);
+  const name=qs("#personEditName").value.trim();
+  if(!name)return toast("Name fehlt");
   try{
-    await api(`/api/people/${id}`,{method:"PUT",body:JSON.stringify({name:qs(`#pn-${id}`).value,color:qs(`#pc-${id}`).value,ical_title:qs(`#pit-${id}`).value})});
+    await api(`/api/people/${id}`,{method:"PUT",body:JSON.stringify({name,color:qs("#personEditColor").value,ical_title:qs("#personEditIcalTitle").value.trim()})});
+    closePersonEditor();
     await loadPeople(); await loadEntries(); toast("Person aktualisiert");
   }catch(e){toast(e.message);}
 }
@@ -973,6 +996,8 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       qs("#newPerson").value="";await loadPeople();toast("Person hinzugefügt");
     }catch(e){toast(e.message);}
   });
+  qs("#personEditorSave").addEventListener("click",savePersonEditor);
+
   qs("#copyIcal").addEventListener("click",()=>copyCalendarUrl(qs("#copyIcal").dataset.url));
   qs("#showGlobalQr").addEventListener("click",()=>toggleQrBox("#globalQrBox","#globalQrImage",qs("#showGlobalQr").dataset.url||"/api/calendar-qr.png"));
   qs("#periodStart").value=isoToday();

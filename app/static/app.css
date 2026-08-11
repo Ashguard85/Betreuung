@@ -509,3 +509,34 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
   .calendar-url-display{font-size:10px;padding:8px 9px}
   .ical-feed-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+
+/* v34 - kompakte Personenverwaltung auf dem iPhone */
+.person-compact-card{display:grid;grid-template-columns:minmax(0,1fr) 38px;gap:7px;align-items:stretch;border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;min-width:0}
+.person-compact-main{min-width:0;border:0;background:transparent;padding:9px 8px 9px 10px;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:9px;align-items:center;text-align:left;color:var(--text)}
+.person-color-dot{width:30px;height:30px;border-radius:10px;border:1px solid rgba(0,0,0,.06);box-shadow:inset 0 0 0 3px rgba(255,255,255,.42)}
+.person-compact-text{min-width:0;display:flex;flex-direction:column;gap:1px;line-height:1.15}
+.person-compact-text strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.person-compact-text small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.person-title-default{opacity:.72;font-style:italic}
+.person-edit-mark{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:5px 7px;border-radius:999px;white-space:nowrap}
+.person-delete-btn{border:0;border-left:1px solid var(--line);background:#fff;color:var(--danger);font-size:20px;line-height:1;min-width:38px;padding:0}
+.person-delete-btn:active,.person-compact-main:active{background:#f7f9f8}
+.person-add-row{display:grid;grid-template-columns:minmax(0,1fr) 42px;gap:7px;align-items:center;padding-top:3px}
+.person-add-label{grid-column:1/-1;font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.person-add-row .input{min-width:0;height:40px;padding:8px 10px}
+.person-add-row .color{width:40px;height:40px}
+.person-add-button{grid-column:1/-1;height:40px;padding:8px 12px}
+.person-editor-modal{width:min(430px,calc(100vw - 24px));padding:16px;border-radius:22px}
+.person-editor-head{margin-bottom:10px}.person-editor-head h3{margin:0;font-size:19px}
+.person-editor-color-row{display:grid;grid-template-columns:58px minmax(0,1fr);gap:10px;align-items:end;margin-top:11px}
+.person-editor-color{width:46px;height:42px}.person-editor-title-field{min-width:0}.person-editor-hint{margin:7px 0 12px}
+@media(max-width:480px){
+  .people-settings{gap:6px}
+  .person-compact-main{grid-template-columns:30px minmax(0,1fr);padding:8px 7px 8px 9px}
+  .person-color-dot{width:28px;height:28px;border-radius:9px}
+  .person-edit-mark{display:none}
+  .person-delete-btn{min-height:44px}
+  .settings-disclosure-body{padding-top:9px}
+  .person-editor-modal{max-height:calc(100dvh - 28px);overflow:auto}
+}

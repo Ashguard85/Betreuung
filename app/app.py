@@ -545,6 +545,54 @@ def entry_snapshot(entry_id):
         r=conn.execute("SELECT e.id,e.day,e.person_id,e.note,e.all_day,e.start_time,e.end_time,p.name AS person FROM entries e JOIN people p ON p.id=e.person_id WHERE e.id=?",(entry_id,)).fetchone()
     return dict(r) if r else None
 
+
+@app.get("/api/history")
+@login_required
+def api_history():
+    with db() as conn:
+        rows = conn.execute("SELECT id,action,entry_id,snapshot,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
+    result=[]
+    for row in rows:
+        try:
+            snapshot=json.loads(row["snapshot"] or "{}")
+            if not isinstance(snapshot, dict): snapshot={}
+        except Exception:
+            snapshot={}
+        result.append({"id":row["id"],"action":row["action"],"entry_id":row["entry_id"],"snapshot":snapshot,"created_at":row["created_at"]})
+    return jsonify(result)
+
+
+@app.post("/api/history/<int:history_id>/restore")
+@login_required
+def api_history_restore(history_id):
+    with db() as conn:
+        row=conn.execute("SELECT * FROM history WHERE id=?",(history_id,)).fetchone()
+        if not row:
+            return jsonify({"error":"Änderung nicht gefunden"}),404
+        try:
+            snap=json.loads(row["snapshot"] or "{}")
+        except Exception:
+            return jsonify({"error":"Gespeicherter Eintrag ist ungültig"}),400
+        day=valid_iso_day(str(snap.get("day", "")))
+        if not day:
+            return jsonify({"error":"Gespeichertes Datum ist ungültig"}),400
+        occupied=conn.execute("SELECT id FROM entries WHERE day=?",(day,)).fetchone()
+        if occupied:
+            return jsonify({"error":"Für dieses Datum existiert bereits ein Betreuungseintrag"}),409
+        person_id=snap.get("person_id")
+        person=conn.execute("SELECT id FROM people WHERE id=?",(person_id,)).fetchone() if person_id else None
+        if not person and snap.get("person"):
+            person=conn.execute("SELECT id FROM people WHERE name=?",(str(snap.get("person")),)).fetchone()
+        if not person:
+            return jsonify({"error":"Die Betreuungsperson existiert nicht mehr"}),409
+        now=datetime.now().isoformat(timespec="seconds")
+        cur=conn.execute("""INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)""",
+            (day,person["id"],str(snap.get("note", "")),1 if snap.get("all_day",1) else 0,str(snap.get("start_time", "")),str(snap.get("end_time", "")),now,now))
+        restored_id=cur.lastrowid
+    history_add("restored", entry_snapshot(restored_id), restored_id)
+    backup_db("history-restore")
+    return jsonify({"ok":True,"id":restored_id})
+
 @app.get("/api/config")
 @login_required
 def api_config():

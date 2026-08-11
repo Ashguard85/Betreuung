@@ -154,3 +154,7 @@ ALLOW_HTTP_CALENDAR_SUBSCRIPTIONS=false
 Aus Sicherheitsgründen blockiert der Server bei Kalender-Abos private, lokale und Link-Local-Zieladressen. HTTP ist standardmäßig deaktiviert; öffentliche HTTPS-Feeds sind empfohlen.
 
 Personen-Kalender verwenden ab v30 jeweils einen eigenen zufälligen, widerrufbaren Schlüssel. Ein Widerruf betrifft nur die gewählte Person.
+
+
+## v33
+Setup-Bereiche sind einklappbar, Kalenderlinks werden vollständig umbrochen angezeigt, Personenfeeds sind einzeln einklappbar und der Änderungsverlauf besitzt nun die fehlenden API-Endpunkte.

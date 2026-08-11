@@ -683,17 +683,19 @@ function renderPersonIcalFeeds(items=[]){
   if(!box) return;
   if(!items.length){box.innerHTML="";return;}
   box.innerHTML=`<div class="ical-section-label">Pro Person</div>`+items.map(item=>`
-    <div class="ical-feed">
-      <div class="ical-feed-head"><span class="dot" style="background:${esc(item.color||"#ececec")}"></span><b>${esc(item.name)}</b></div>
-      <div class="pathbox compact">${esc(item.url)}</div>
-      <div class="ical-feed-actions">
-        <button class="secondary ical-copy" type="button" data-url="${esc(item.url)}" data-name="${esc(item.name)}">Kopieren</button>
-        <a class="secondary link-button" href="${esc(webcalUrl(item.url))}">Abonnieren</a>
-        <button class="secondary person-qr" type="button" data-id="${item.id}">QR-Code</button>
-        <button class="secondary danger person-revoke" type="button" data-id="${item.id}" data-name="${esc(item.name)}">Freigabe widerrufen</button>
+    <details class="ical-feed">
+      <summary class="ical-feed-head"><span class="dot" style="background:${esc(item.color||"#ececec")}"></span><b>${esc(item.name)}</b></summary>
+      <div class="ical-feed-body">
+        <div class="pathbox calendar-url-display">${esc(item.url)}</div>
+        <div class="ical-feed-actions">
+          <button class="secondary ical-copy" type="button" data-url="${esc(item.url)}" data-name="${esc(item.name)}">Kopieren</button>
+          <a class="secondary link-button" href="${esc(webcalUrl(item.url))}">Abonnieren</a>
+          <button class="secondary person-qr" type="button" data-id="${item.id}">QR-Code</button>
+          <button class="secondary danger person-revoke" type="button" data-id="${item.id}" data-name="${esc(item.name)}">Freigabe widerrufen</button>
+        </div>
+        <div id="personQrBox-${item.id}" class="qr-box" style="display:none"><img id="personQrImage-${item.id}" alt="QR-Code ${esc(item.name)}"></div>
       </div>
-      <div id="personQrBox-${item.id}" class="qr-box" style="display:none"><img id="personQrImage-${item.id}" alt="QR-Code ${esc(item.name)}"></div>
-    </div>`).join("");
+    </details>`).join("");
   qsa(".ical-copy").forEach(btn=>btn.addEventListener("click",()=>copyCalendarUrl(btn.dataset.url,`${btn.dataset.name}-Link`)));
   qsa(".person-qr").forEach(btn=>btn.addEventListener("click",()=>toggleQrBox(`#personQrBox-${btn.dataset.id}`,`#personQrImage-${btn.dataset.id}`,`/api/people/${btn.dataset.id}/calendar-qr.png`)));
   qsa(".person-revoke").forEach(btn=>btn.addEventListener("click",async()=>{
@@ -739,7 +741,10 @@ async function loadHistory(){
     const labels={created:"Erstellt",updated:"Geändert",deleted:"Gelöscht",restored:"Wiederhergestellt"};
     box.innerHTML=rows.length?rows.map(h=>{const x=h.snapshot||{};return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${x.note?" · "+esc(compactHistoryText(x.note)):""}</div></div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`}).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
     qsa(".history-restore").forEach(b=>b.addEventListener("click",async()=>{try{await api(`/api/history/${b.dataset.id}/restore`,{method:"POST",body:"{}"});await loadEntries();await loadHistory();toast("Wiederhergestellt");}catch(e){toast(e.message);}}));
-  }catch(e){box.innerHTML=`<div class="small">${esc(e.message)}</div>`;}
+  }catch(e){
+    console.error("Änderungsverlauf konnte nicht geladen werden", e);
+    box.innerHTML='<div class="small danger">Änderungsverlauf konnte nicht geladen werden.</div>';
+  }
 }
 
 

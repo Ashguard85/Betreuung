@@ -482,3 +482,30 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
   .history-restore{font-size:11px;padding:7px 8px}
   #settingsPage input[type="file"].input{font-size:12px;padding:8px;min-width:0;max-width:100%}
 }
+
+
+/* v33: compact collapsible setup + readable full calendar URLs */
+.settings-grid{grid-template-columns:1fr!important;gap:10px!important}
+.settings-disclosure{padding:0!important;overflow:hidden}
+.settings-disclosure>summary,.nested-disclosure>summary,.ical-feed>summary{list-style:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.settings-disclosure>summary::-webkit-details-marker,.nested-disclosure>summary::-webkit-details-marker,.ical-feed>summary::-webkit-details-marker{display:none}
+.settings-disclosure>summary{position:relative;padding:15px 44px 15px 15px;font-size:16px;font-weight:800;line-height:1.2}
+.settings-disclosure>summary::after,.nested-disclosure>summary::after,.ical-feed>summary::after{content:"⌄";position:absolute;right:15px;top:50%;transform:translateY(-50%);font-size:19px;color:var(--muted);transition:transform .16s ease}
+.settings-disclosure[open]>summary::after,.nested-disclosure[open]>summary::after,.ical-feed[open]>summary::after{transform:translateY(-50%) rotate(180deg)}
+.settings-disclosure-body{padding:0 15px 15px;border-top:1px solid var(--line);padding-top:13px;min-width:0}
+.nested-disclosure{border:1px solid var(--line);border-radius:13px;background:#fafbfa;overflow:hidden}
+.nested-disclosure>summary{position:relative;padding:11px 40px 11px 12px;font-size:13px;font-weight:750}
+.nested-disclosure-body{padding:0 11px 11px;border-top:1px solid var(--line);padding-top:10px;min-width:0}
+.calendar-url-display{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important;word-break:break-all!important;max-height:none!important;line-height:1.35;font-size:10.5px}
+.subscription-url{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;word-break:break-all;line-height:1.25}
+.ical-feed{padding:0!important;border:1px solid var(--line);border-radius:12px;background:#fafbfa;overflow:hidden}
+.ical-feed>summary.ical-feed-head{position:relative;padding:11px 40px 11px 11px;display:flex;align-items:center;gap:7px}
+.ical-feed-body{padding:0 10px 10px;border-top:1px solid var(--line);padding-top:9px;min-width:0}
+.ical-person-list{display:grid;gap:7px}
+.ical-section-label{margin-bottom:2px}
+@media(max-width:430px){
+  .settings-disclosure>summary{padding:13px 42px 13px 13px}
+  .settings-disclosure-body{padding:11px 12px 13px}
+  .calendar-url-display{font-size:10px;padding:8px 9px}
+  .ical-feed-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+}

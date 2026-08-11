@@ -117,132 +117,120 @@
       <p>Personen, Ferien, Feiertage, Kalenderfeed und Datensicherung.</p>
     </div>
 
-    <div class="grid two">
-      <div class="card">
-        <h3>Betreuungspersonen</h3>
-        <div id="peopleSettings" class="people-settings"></div>
-        <div class="row topgap">
-          <input id="newPerson" class="input" placeholder="Neue Person">
-          <input id="newColor" type="color" value="#e8e8e8" class="color">
-          <button class="secondary" id="addPerson">+</button>
-        </div>
-      </div>
-
-
-      <div class="card period-card">
-        <h3>Ferien & Feiertage</h3>
-        <p class="small">Ferien kannst du als ganzen Zeitraum erfassen. Feiertage lassen sich zusätzlich aus einer .ics-Datei importieren.</p>
-
-        <div class="period-form-grid topgap">
-          <div>
-            <label class="label">Von</label>
-            <input id="periodStart" class="input" type="date">
-          </div>
-          <div>
-            <label class="label">Bis</label>
-            <input id="periodEnd" class="input" type="date">
-          </div>
-          <div>
-            <label class="label">Art</label>
-            <select id="periodKind" class="input">
-              <option value="vacation">Ferien</option>
-              <option value="holiday">Feiertag</option>
-              <option value="other">Anderer Zeitraum</option>
-            </select>
-          </div>
-          <div>
-            <label class="label">Farbe</label>
-            <input id="periodColor" class="color period-color" type="color" value="#f2a65a">
-          </div>
-        </div>
-        <label class="label topgap">Bezeichnung</label>
-        <input id="periodLabel" class="input" placeholder="z. B. Sommerferien">
-        <button id="addPeriod" class="secondary topgap full">Zeitraum speichern</button>
-
-        <div id="periodList" class="period-list topgap"></div>
-
-        <hr class="separator">
-        <h3>Kalender-Abos</h3>
-        <p class="small">Automatisch aktualisierte Ferien- oder Feiertagskalender. Öffentliche oder geheime HTTPS-.ics-URLs werden standardmäßig alle 12 Stunden synchronisiert.</p>
-        <div class="subscription-form topgap">
-          <input id="subName" class="input" placeholder="Name, z. B. Feiertage Zürich">
-          <input id="subUrl" class="input" type="url" inputmode="url" autocomplete="off" placeholder="https://…/kalender.ics">
-          <div class="row">
-            <select id="subKind" class="input">
-              <option value="holiday">Feiertage</option>
-              <option value="vacation">Ferien</option>
-              <option value="other">Andere Termine</option>
-            </select>
-            <input id="subColor" class="color" type="color" value="#d65a6f">
-            <button id="addSubscription" class="secondary" type="button">Abo hinzufügen</button>
-          </div>
-        </div>
-        <div id="subscriptionList" class="subscription-list topgap"></div>
-
-        <hr class="separator">
-        <h3>Feiertagskalender importieren</h3>
-        <p class="small">Importiert ganztägige Termine aus einer iCalendar-Datei (.ics). Beim erneuten Import werden Termine mit derselben UID aktualisiert.</p>
-        <form id="icsImportForm" class="topgap">
-          <input class="input" type="file" name="file" accept=".ics,text/calendar" required>
+    <div class="grid settings-grid">
+      <details class="card settings-disclosure">
+        <summary>Betreuungspersonen</summary>
+        <div class="settings-disclosure-body">
+          <div id="peopleSettings" class="people-settings"></div>
           <div class="row topgap">
-            <label class="small">Feiertagsfarbe</label>
-            <input id="icsColor" name="color" class="color" type="color" value="#d65a6f">
-            <input type="hidden" name="kind" value="holiday">
-            <span class="spacer"></span>
-            <button class="secondary" type="submit">ICS importieren</button>
+            <input id="newPerson" class="input" placeholder="Neue Person">
+            <input id="newColor" type="color" value="#e8e8e8" class="color">
+            <button class="secondary" id="addPerson">+</button>
           </div>
-        </form>
-      </div>
-
-      <div class="card">
-        <h3>Kalender-Abos</h3>
-        <p class="small">Schreibgeschützte iCal-Abos für Apple Kalender, Outlook und andere Kalender-Apps. Personen-Kalender lassen sich separat abonnieren und einfärben.</p>
-        <div class="ical-title">Gesamtkalender</div>
-        <div id="icalBox" class="pathbox compact">Nicht aktiviert.</div>
-        <div class="row topgap ical-global-actions">
-          <button id="copyIcal" class="secondary" style="display:none">Kopieren</button>
-          <button id="showGlobalQr" class="secondary" style="display:none" type="button">QR-Code</button>
-          <a id="subscribeIcal" class="secondary link-button" style="display:none">Abonnieren</a>
         </div>
-        <div id="globalQrBox" class="qr-box" style="display:none"><img id="globalQrImage" alt="QR-Code Gesamtkalender"></div>
-        <div id="icalPersonList" class="ical-person-list topgap"></div>
-        <p id="icalSecurityHint" class="small topgap" style="display:none">Jede Person hat einen eigenen widerrufbaren Kalender-Schlüssel. „Freigabe widerrufen“ macht nur diesen einen Link ungültig; alle anderen Kalender bleiben unverändert.</p>
-        <hr class="separator">
-        <label class="label" for="icalTitleTemplate">Titel der Kalendereinträge</label>
-        <input id="icalTitleTemplate" class="input" value="{person}" placeholder="z. B. Betreuung – {person}">
-        <p class="small"><code>{person}</code> wird durch den Namen ersetzt, <code>{app}</code> durch den App-Namen.</p>
-        <button id="saveIcalTitle" class="secondary topgap" type="button">Kalendertitel speichern</button>
-      </div>
+      </details>
 
-      <div class="card">
-        <div class="row"><h3>Letzte Änderungen</h3><span class="spacer"></span><button id="refreshHistory" class="secondary" type="button">Aktualisieren</button></div>
-        <p class="small">Die letzten 20 Änderungen. Gelöschte Betreuungstage können direkt wiederhergestellt werden.</p>
-        <div id="historyList" class="history-list"></div>
-      </div>
+      <details class="card settings-disclosure">
+        <summary>Ferien & Feiertage</summary>
+        <div class="settings-disclosure-body">
+          <p class="small">Ferien kannst du als ganzen Zeitraum erfassen. Feiertage lassen sich importieren oder als Kalender-Abo automatisch synchronisieren.</p>
+          <div class="period-form-grid topgap">
+            <div><label class="label">Von</label><input id="periodStart" class="input" type="date"></div>
+            <div><label class="label">Bis</label><input id="periodEnd" class="input" type="date"></div>
+            <div><label class="label">Art</label><select id="periodKind" class="input"><option value="vacation">Ferien</option><option value="holiday">Feiertag</option><option value="other">Anderer Zeitraum</option></select></div>
+            <div><label class="label">Farbe</label><input id="periodColor" class="color period-color" type="color" value="#f2a65a"></div>
+          </div>
+          <label class="label topgap">Bezeichnung</label>
+          <input id="periodLabel" class="input" placeholder="z. B. Sommerferien">
+          <button id="addPeriod" class="secondary topgap full">Zeitraum speichern</button>
+          <div id="periodList" class="period-list topgap"></div>
 
-      <div class="card">
-        <h3>CSV Import / Export</h3>
-        <p class="small">Import erwartet Spalten <b>Datum;Betreuung;Bemerkung</b>. Bestehende Tage werden aktualisiert.</p>
-        <form id="importForm">
-          <input class="input" type="file" name="file" accept=".csv,text/csv" required>
-          <button class="secondary topgap" type="submit">CSV importieren</button>
-        </form>
-      </div>
+          <details class="nested-disclosure topgap">
+            <summary>Automatische Kalender-Abos</summary>
+            <div class="nested-disclosure-body">
+              <p class="small">Öffentliche oder geheime HTTPS-.ics-URLs werden standardmäßig alle 12 Stunden synchronisiert.</p>
+              <div class="subscription-form topgap">
+                <input id="subName" class="input" placeholder="Name, z. B. Feiertage Zürich">
+                <input id="subUrl" class="input" type="url" inputmode="url" autocomplete="off" placeholder="https://…/kalender.ics">
+                <div class="row">
+                  <select id="subKind" class="input"><option value="holiday">Feiertage</option><option value="vacation">Ferien</option><option value="other">Andere Termine</option></select>
+                  <input id="subColor" class="color" type="color" value="#d65a6f">
+                  <button id="addSubscription" class="secondary" type="button">Abo hinzufügen</button>
+                </div>
+              </div>
+              <div id="subscriptionList" class="subscription-list topgap"></div>
+            </div>
+          </details>
 
-      <div class="card">
-        <h3>Daten sichern / wiederherstellen</h3>
-        <p class="small">Komplett-Backup mit Betreuungspersonen, Einträgen, Ferien und Feiertagen. Unabhängig von der internen SQLite-Datei.</p>
-        <button id="fullDataExport" class="secondary full server-export" type="button">Komplett-Backup exportieren</button>
-        <form id="fullDataImportForm" class="topgap">
-          <input class="input" type="file" name="file" accept=".json,application/json" required>
-          <button class="secondary danger full topgap" type="submit">Backup wiederherstellen</button>
-        </form>
-        <p class="small">Beim Wiederherstellen werden die aktuellen App-Daten durch den Inhalt der Backup-Datei ersetzt. Vorher legt die App automatisch ein SQLite-Sicherheitsbackup an.</p>
-        <hr class="separator">
-        <p class="ok">● SQLite persistent</p>
-        <div id="dataFile" class="pathbox">/app/data/betreuung.sqlite</div>
-        <p class="small">Zusätzlich erzeugt die App nach Änderungen konsistente SQLite-Sicherungen im Unterordner <b>backups</b>. Der gesamte Host-Ordner kann unabhängig vom Container gesichert werden.</p>
-      </div>
+          <details class="nested-disclosure topgap">
+            <summary>ICS-Datei einmalig importieren</summary>
+            <div class="nested-disclosure-body">
+              <p class="small">Importiert ganztägige Termine aus einer iCalendar-Datei (.ics). Beim erneuten Import werden Termine mit derselben UID aktualisiert.</p>
+              <form id="icsImportForm" class="topgap">
+                <input class="input" type="file" name="file" accept=".ics,text/calendar" required>
+                <div class="row topgap">
+                  <label class="small">Feiertagsfarbe</label>
+                  <input id="icsColor" name="color" class="color" type="color" value="#d65a6f">
+                  <input type="hidden" name="kind" value="holiday">
+                  <span class="spacer"></span>
+                  <button class="secondary" type="submit">ICS importieren</button>
+                </div>
+              </form>
+            </div>
+          </details>
+        </div>
+      </details>
+
+      <details class="card settings-disclosure">
+        <summary>Kalender-Freigaben</summary>
+        <div class="settings-disclosure-body">
+          <p class="small">Schreibgeschützte iCal-Abos für Apple Kalender, Outlook und andere Kalender-Apps.</p>
+          <div class="ical-title">Gesamtkalender</div>
+          <div id="icalBox" class="pathbox calendar-url-display">Nicht aktiviert.</div>
+          <div class="row topgap ical-global-actions">
+            <button id="copyIcal" class="secondary" style="display:none">Kopieren</button>
+            <button id="showGlobalQr" class="secondary" style="display:none" type="button">QR-Code</button>
+            <a id="subscribeIcal" class="secondary link-button" style="display:none">Abonnieren</a>
+          </div>
+          <div id="globalQrBox" class="qr-box" style="display:none"><img id="globalQrImage" alt="QR-Code Gesamtkalender"></div>
+          <div id="icalPersonList" class="ical-person-list topgap"></div>
+          <p id="icalSecurityHint" class="small topgap" style="display:none">Jede Person hat einen eigenen widerrufbaren Kalender-Schlüssel. „Freigabe widerrufen“ macht nur diesen einen Link ungültig.</p>
+          <hr class="separator">
+          <label class="label" for="icalTitleTemplate">Titel der Kalendereinträge</label>
+          <input id="icalTitleTemplate" class="input" value="{person}" placeholder="z. B. Betreuung – {person}">
+          <p class="small"><code>{person}</code> wird durch den Namen ersetzt, <code>{app}</code> durch den App-Namen.</p>
+          <button id="saveIcalTitle" class="secondary topgap" type="button">Kalendertitel speichern</button>
+        </div>
+      </details>
+
+      <details class="card settings-disclosure">
+        <summary>Letzte Änderungen</summary>
+        <div class="settings-disclosure-body">
+          <div class="row"><p class="small">Die letzten 20 Änderungen. Gelöschte Betreuungstage können wiederhergestellt werden.</p><span class="spacer"></span><button id="refreshHistory" class="secondary" type="button">Aktualisieren</button></div>
+          <div id="historyList" class="history-list"></div>
+        </div>
+      </details>
+
+      <details class="card settings-disclosure">
+        <summary>CSV Import / Export</summary>
+        <div class="settings-disclosure-body">
+          <p class="small">Import erwartet Spalten <b>Datum;Betreuung;Bemerkung</b>. Bestehende Tage werden aktualisiert.</p>
+          <form id="importForm"><input class="input" type="file" name="file" accept=".csv,text/csv" required><button class="secondary topgap" type="submit">CSV importieren</button></form>
+        </div>
+      </details>
+
+      <details class="card settings-disclosure">
+        <summary>Daten sichern / wiederherstellen</summary>
+        <div class="settings-disclosure-body">
+          <p class="small">Komplett-Backup mit Betreuungspersonen, Einträgen, Ferien, Feiertagen und Kalender-Abos.</p>
+          <button id="fullDataExport" class="secondary full server-export" type="button">Komplett-Backup exportieren</button>
+          <form id="fullDataImportForm" class="topgap"><input class="input" type="file" name="file" accept=".json,application/json" required><button class="secondary danger full topgap" type="submit">Backup wiederherstellen</button></form>
+          <p class="small">Vor einer Wiederherstellung legt die App automatisch ein SQLite-Sicherheitsbackup an.</p>
+          <hr class="separator"><p class="ok">● SQLite persistent</p>
+          <div id="dataFile" class="pathbox">/app/data/betreuung.sqlite</div>
+          <p class="small">Zusätzlich erzeugt die App nach Änderungen konsistente SQLite-Sicherungen im Unterordner <b>backups</b>.</p>
+        </div>
+      </details>
     </div>
   </section>
 </div>

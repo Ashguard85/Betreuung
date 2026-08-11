@@ -687,8 +687,8 @@ function renderPersonIcalFeeds(items=[]){
       <div class="ical-feed-head"><span class="dot" style="background:${esc(item.color||"#ececec")}"></span><b>${esc(item.name)}</b></div>
       <div class="pathbox compact">${esc(item.url)}</div>
       <div class="ical-feed-actions">
-        <button class="secondary ical-copy" type="button" data-url="${esc(item.url)}" data-name="${esc(item.name)}">Link kopieren</button>
-        <a class="secondary link-button" href="${esc(webcalUrl(item.url))}">Auf iPhone abonnieren</a>
+        <button class="secondary ical-copy" type="button" data-url="${esc(item.url)}" data-name="${esc(item.name)}">Kopieren</button>
+        <a class="secondary link-button" href="${esc(webcalUrl(item.url))}">Abonnieren</a>
         <button class="secondary person-qr" type="button" data-id="${item.id}">QR-Code</button>
         <button class="secondary danger person-revoke" type="button" data-id="${item.id}" data-name="${esc(item.name)}">Freigabe widerrufen</button>
       </div>
@@ -727,12 +727,17 @@ async function loadConfig(){
   loadHistory();
 }
 
+function compactHistoryText(value, maxLen=120){
+  const text=String(value||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
+  return text.length>maxLen?text.slice(0,maxLen-1)+"…":text;
+}
+
 async function loadHistory(){
   const box=qs("#historyList"); if(!box) return;
   try{
     const rows=await api("/api/history");
     const labels={created:"Erstellt",updated:"Geändert",deleted:"Gelöscht",restored:"Wiederhergestellt"};
-    box.innerHTML=rows.length?rows.map(h=>{const x=h.snapshot||{};return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${x.note?" · "+esc(x.note):""}</div></div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`}).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
+    box.innerHTML=rows.length?rows.map(h=>{const x=h.snapshot||{};return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${x.note?" · "+esc(compactHistoryText(x.note)):""}</div></div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`}).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
     qsa(".history-restore").forEach(b=>b.addEventListener("click",async()=>{try{await api(`/api/history/${b.dataset.id}/restore`,{method:"POST",body:"{}"});await loadEntries();await loadHistory();toast("Wiederhergestellt");}catch(e){toast(e.message);}}));
   }catch(e){box.innerHTML=`<div class="small">${esc(e.message)}</div>`;}
 }

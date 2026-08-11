@@ -11,7 +11,7 @@
   <link rel="icon" type="image/png" sizes="64x64" href="/favicon-v17.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v17.png">
   <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-v17.png">
-  <link rel="stylesheet" href="/static/app.css?v=21">
+  <link rel="stylesheet" href="/static/app.css?v=32">
   <title>{{ title }}</title>
 </head>
 <body>
@@ -195,14 +195,14 @@
       </div>
 
       <div class="card">
-        <h3>Kalender auf dem iPhone</h3>
-        <p class="small">Schreibgeschützte iCal-Abos. Der Gesamtkalender enthält alle Einträge; die Personen-Kalender lassen sich auf dem iPhone separat abonnieren und einfärben.</p>
+        <h3>Kalender-Abos</h3>
+        <p class="small">Schreibgeschützte iCal-Abos für Apple Kalender, Outlook und andere Kalender-Apps. Personen-Kalender lassen sich separat abonnieren und einfärben.</p>
         <div class="ical-title">Gesamtkalender</div>
-        <div id="icalBox" class="pathbox">Nicht aktiviert.</div>
-        <div class="row topgap">
-          <button id="copyIcal" class="secondary" style="display:none">Link kopieren</button>
+        <div id="icalBox" class="pathbox compact">Nicht aktiviert.</div>
+        <div class="row topgap ical-global-actions">
+          <button id="copyIcal" class="secondary" style="display:none">Kopieren</button>
           <button id="showGlobalQr" class="secondary" style="display:none" type="button">QR-Code</button>
-          <a id="subscribeIcal" class="secondary link-button" style="display:none">Auf iPhone abonnieren</a>
+          <a id="subscribeIcal" class="secondary link-button" style="display:none">Abonnieren</a>
         </div>
         <div id="globalQrBox" class="qr-box" style="display:none"><img id="globalQrImage" alt="QR-Code Gesamtkalender"></div>
         <div id="icalPersonList" class="ical-person-list topgap"></div>
@@ -390,6 +390,6 @@
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=22"></script>
+<script src="/static/app.js?v=32"></script>
 </body>
 </html>

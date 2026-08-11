@@ -62,7 +62,7 @@
       </div>
 
       <div class="card">
-        <div class="row"><h3>Nächste Betreuung</h3><span class="spacer"></span><button class="secondary" onclick="showPage('list')">Alle</button></div>
+        <div class="row"><h3>Die nächsten 7 Tage</h3><span class="spacer"></span><button class="secondary" onclick="showPage('list')">Alle</button></div>
         <div id="nextList" class="list"></div>
       </div>
     </div>
@@ -186,6 +186,17 @@
         </div>
         <div id="icalPersonList" class="ical-person-list topgap"></div>
         <p id="icalSecurityHint" class="small topgap" style="display:none">Jeder Personen-Link hat einen eigenen abgeleiteten Token. Wer z. B. nur diesen Link erhält, kann den Parameter nicht einfach auf eine andere Person ändern.</p>
+        <hr class="separator">
+        <label class="label" for="icalTitleTemplate">Titel der Kalendereinträge</label>
+        <input id="icalTitleTemplate" class="input" value="{person}" placeholder="z. B. Betreuung – {person}">
+        <p class="small"><code>{person}</code> wird durch den Namen ersetzt, <code>{app}</code> durch den App-Namen.</p>
+        <button id="saveIcalTitle" class="secondary topgap" type="button">Kalendertitel speichern</button>
+      </div>
+
+      <div class="card">
+        <div class="row"><h3>Letzte Änderungen</h3><span class="spacer"></span><button id="refreshHistory" class="secondary" type="button">Aktualisieren</button></div>
+        <p class="small">Die letzten 20 Änderungen. Gelöschte Betreuungstage können direkt wiederhergestellt werden.</p>
+        <div id="historyList" class="history-list"></div>
       </div>
 
       <div class="card">
@@ -247,6 +258,7 @@
     <textarea id="modalNote" class="input" placeholder="Optional"></textarea>
     <div class="space"></div>
     <button class="primary" id="modalSave">Speichern</button>
+    <button class="secondary full topgap" id="modalDuplicate" style="display:none">Termin duplizieren</button>
     <button class="secondary full topgap" id="modalShare" style="display:none">Termin teilen (.ics)</button>
     <button class="secondary danger full topgap" id="modalDelete" style="display:none">Eintrag löschen</button>
   </div>
@@ -336,6 +348,10 @@
         </div>
       </div>
 
+      <div class="batch-field batch-field-wide batch-skip-row">
+        <label class="checkline"><input id="batchSkipVacations" type="checkbox"> Ferien überspringen</label>
+        <label class="checkline"><input id="batchSkipHolidays" type="checkbox"> Feiertage überspringen</label>
+      </div>
       <div class="batch-field batch-field-wide">
         <label class="label" for="batchNote">Bemerkung <span class="small">(optional)</span></label>
         <input id="batchNote" class="input" placeholder="z. B. reguläre Kita">

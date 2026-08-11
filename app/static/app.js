@@ -220,7 +220,8 @@ function showPage(name){
 }
 function renderNext(){
   const today=isoToday();
-  const arr=entries.filter(e=>e.day>=today).sort((a,b)=>a.day.localeCompare(b.day)).slice(0,5);
+  const end=addDaysIso(today,6);
+  const arr=entries.filter(e=>e.day>=today && e.day<=end).sort((a,b)=>a.day.localeCompare(b.day));
   qs("#nextList").innerHTML = arr.length ? arr.map(itemHtml).join("") : '<div class="small">Keine kommenden Einträge.</div>';
 }
 function itemHtml(e){
@@ -456,6 +457,7 @@ function openModal(id=null){
   setTiming("modal",e);
   selectedModal=e?e.person_id:(people[0]?.id||null);
   renderPersonButtons("#modalPeople","modal");
+  qs("#modalDuplicate").style.display=e?"block":"none";
   qs("#modalShare").style.display=e?"block":"none";
   qs("#modalDelete").style.display=e?"block":"none";
   qs("#modalBack").classList.add("open");
@@ -482,6 +484,8 @@ function batchPayload(){
     start_day:qs("#batchStart").value,
     end_day:qs("#batchEnd").value,
     note:qs("#batchNote").value.trim(),
+    skip_vacations:qs("#batchSkipVacations")?.checked||false,
+    skip_holidays:qs("#batchSkipHolidays")?.checked||false,
     ...timingPayload("batch"),
   };
 }
@@ -496,6 +500,8 @@ function openBatchModal(){
   syncDateShell(qs("#batchEnd"));
   qs("#batchWeekday").value=String((now.getDay()+6)%7);
   qs("#batchNote").value="";
+  if(qs("#batchSkipVacations")) qs("#batchSkipVacations").checked=false;
+  if(qs("#batchSkipHolidays")) qs("#batchSkipHolidays").checked=false;
   setTiming("batch");
   resetBatchPreview();
   qs("#batchModalBack").classList.add("open");
@@ -516,7 +522,8 @@ async function previewBatch(){
     const weekday=qs("#batchWeekday").selectedOptions[0]?.textContent || "Wochentag";
     const occupiedText=(data.occupied||[]).map(x=>`${formatIsoDate(x.day)} (${x.person})`).join(" · ");
     qs("#batchPreviewBox").title=occupiedText ? `Bereits belegt: ${occupiedText}` : "";
-    qs("#batchPreviewBox").innerHTML=`<b>${data.matched_count} ${esc(weekday)}</b><span>${data.create_count} neu · ${data.skipped_count} belegt</span>`;
+    const skipped=[]; if(data.occupied?.length) skipped.push(`${data.occupied.length} belegt`); if(data.vacation_count) skipped.push(`${data.vacation_count} Ferien`); if(data.holiday_count) skipped.push(`${data.holiday_count} Feiertag${data.holiday_count===1?"":"e"}`);
+    qs("#batchPreviewBox").innerHTML=`<b>${data.matched_count} ${esc(weekday)}</b><span>${data.create_count} neu${skipped.length?" · "+skipped.join(" · "):""}</span>`;
     qs("#batchPreviewBox").hidden=false;
     batchPreviewKey=JSON.stringify(payload);
     qs("#batchCreate").disabled=data.create_count===0;
@@ -639,6 +646,18 @@ async function loadConfig(){
     qs("#icalSecurityHint").style.display="none";
     renderPersonIcalFeeds([]);
   }
+  if(qs("#icalTitleTemplate")) qs("#icalTitleTemplate").value=c.ical_title_template||"{person}";
+  loadHistory();
+}
+
+async function loadHistory(){
+  const box=qs("#historyList"); if(!box) return;
+  try{
+    const rows=await api("/api/history");
+    const labels={created:"Erstellt",updated:"Geändert",deleted:"Gelöscht",restored:"Wiederhergestellt"};
+    box.innerHTML=rows.length?rows.map(h=>{const x=h.snapshot||{};return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${x.note?" · "+esc(x.note):""}</div></div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`}).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
+    qsa(".history-restore").forEach(b=>b.addEventListener("click",async()=>{try{await api(`/api/history/${b.dataset.id}/restore`,{method:"POST",body:"{}"});await loadEntries();await loadHistory();toast("Wiederhergestellt");}catch(e){toast(e.message);}}));
+  }catch(e){box.innerHTML=`<div class="small">${esc(e.message)}</div>`;}
 }
 
 
@@ -722,7 +741,7 @@ function applyOnlineState(){
   document.body.classList.toggle("is-offline",!online);
   const banner=qs("#offlineBanner");
   if(banner) banner.hidden=online;
-  ["#quickSave","#modalSave","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
+  ["#quickSave","#modalSave","#modalDuplicate","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!online;
   });
   qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
@@ -821,7 +840,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#batchPreview").addEventListener("click",previewBatch);
   qs("#batchCreate").addEventListener("click",createBatch);
   qs("#batchPerson").addEventListener("change",()=>{selectedBatch=Number(qs("#batchPerson").value);resetBatchPreview();});
-  ["#batchWeekday","#batchStart","#batchEnd","#batchNote"].forEach(sel=>{
+  ["#batchWeekday","#batchStart","#batchEnd","#batchNote","#batchSkipVacations","#batchSkipHolidays"].forEach(sel=>{
     qs(sel).addEventListener(sel==="#batchNote"?"input":"change",resetBatchPreview);
   });
   qs("#modalSave").addEventListener("click",async()=>{
@@ -830,6 +849,13 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       await saveEntry(qs("#modalDate").value,selectedModal,qs("#modalNote").value,timingPayload("modal"),editingId);
       closeModal();toast("Gespeichert");
     }catch(e){toast(e.message);}
+  });
+  qs("#modalDuplicate").addEventListener("click",()=>{
+    if(!editingId) return;
+    const e=entries.find(x=>Number(x.id)===Number(editingId)); if(!e) return;
+    editingId=null; qs("#modalTitle").textContent="Termin duplizieren"; qs("#modalDate").value=addDaysIso(e.day,7); syncDateShell(qs("#modalDate"));
+    qs("#modalDelete").style.display="none"; qs("#modalShare").style.display="none"; qs("#modalDuplicate").style.display="none";
+    toast("Neues Datum wählen und speichern");
   });
   qs("#modalShare").addEventListener("click",()=>{
     if(!editingId) return;
@@ -842,6 +868,9 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     try{await api(`/api/entries/${editingId}`,{method:"DELETE"});closeModal();await loadEntries();toast("Gelöscht");}
     catch(e){toast(e.message);}
   });
+
+  qs("#saveIcalTitle")?.addEventListener("click",async()=>{try{const v=qs("#icalTitleTemplate").value.trim()||"{person}";await api("/api/config",{method:"PUT",body:JSON.stringify({ical_title_template:v})});toast("Kalendertitel gespeichert");}catch(e){toast(e.message);}});
+  qs("#refreshHistory")?.addEventListener("click",loadHistory);
   qs("#filterYear").addEventListener("change",renderList);
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});

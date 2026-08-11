@@ -410,3 +410,22 @@ body.modal-open{overflow:hidden}
   .year td.has-continuation .entry-fill{top:36%;height:57%}
   .year.month-view .year-continuation{font-size:5.4px}
 }
+
+/* v28: final iPhone polish + batch exclusions + history */
+.batch-skip-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:2px 0}
+.checkline{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;white-space:nowrap}
+.checkline input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+.history-list{display:grid;gap:8px;margin-top:10px}
+.history-item{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
+.history-item:last-child{border-bottom:0}.history-item>div{min-width:0}.history-restore{flex:0 0 auto;padding:8px 10px}
+@media(max-width:430px){
+  .modal{width:min(calc(100vw - 24px),560px);max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px);overflow:auto;-webkit-overflow-scrolling:touch}
+  .batch-modal{width:calc(100vw - 20px);padding:14px}
+  .batch-form-grid{gap:7px 8px}
+  .batch-modal .input{height:40px;min-height:40px}
+  .batch-skip-row{gap:8px 14px}
+  .person-grid{gap:8px}
+  .person-btn{min-height:42px}
+  textarea.input{min-height:70px}
+  .history-item{align-items:flex-start}.history-item .small{line-height:1.25}
+}

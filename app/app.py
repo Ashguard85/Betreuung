@@ -223,6 +223,20 @@ def init_db():
         );
 
         CREATE INDEX IF NOT EXISTS idx_periods_range ON periods(start_day, end_day);
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action TEXT NOT NULL,
+          entry_id INTEGER,
+          snapshot TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at DESC);
         """)
         # Backwards-compatible migration for databases created before timed entries existed.
         entry_columns = {r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
@@ -470,6 +484,25 @@ def harden_calendar_response(response):
     return response
 
 
+def get_setting(key, default=""):
+    with db() as conn:
+        row=conn.execute("SELECT value FROM settings WHERE key=?",(key,)).fetchone()
+    return row["value"] if row else default
+
+def set_setting(key, value):
+    with db() as conn:
+        conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(key,str(value)))
+
+def history_add(action, snapshot, entry_id=None):
+    with db() as conn:
+        conn.execute("INSERT INTO history(action,entry_id,snapshot,created_at) VALUES(?,?,?,?)",(action,entry_id,json.dumps(snapshot,ensure_ascii=False),datetime.now().isoformat(timespec="seconds")))
+        conn.execute("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 100)")
+
+def entry_snapshot(entry_id):
+    with db() as conn:
+        r=conn.execute("SELECT e.id,e.day,e.person_id,e.note,e.all_day,e.start_time,e.end_time,p.name AS person FROM entries e JOIN people p ON p.id=e.person_id WHERE e.id=?",(entry_id,)).fetchone()
+    return dict(r) if r else None
+
 @app.get("/api/config")
 @login_required
 def api_config():
@@ -491,7 +524,18 @@ def api_config():
         "data_file": str(DB_PATH),
         "backup_dir": str(BACKUP_DIR),
         "auth_enabled": AUTH_ENABLED,
+        "ical_title_template": get_setting("ical_title_template", "{person}"),
     })
+
+@app.put("/api/config")
+@login_required
+def api_config_update():
+    payload=request.get_json(force=True)
+    template=str(payload.get("ical_title_template", "{person}")).strip() or "{person}"
+    if len(template)>80 or "{person}" not in template:
+        return jsonify({"error":"Kalendertitel muss {person} enthalten und maximal 80 Zeichen lang sein"}),400
+    set_setting("ical_title_template",template)
+    return jsonify({"ok":True,"ical_title_template":template})
 
 
 @app.get("/api/people")
@@ -610,6 +654,7 @@ def api_entries_add():
                 )
                 entry_id = cur.lastrowid
                 status = 201
+        history_add("updated" if status==200 else "created", entry_snapshot(entry_id), entry_id)
         backup_db("entry")
         return jsonify({"id": entry_id, "day": day}), status
     except sqlite3.IntegrityError as exc:
@@ -637,6 +682,7 @@ def api_entries_update(entry_id):
                    WHERE id=?""",
                 (day, person_id, note, all_day, start_time, end_time, datetime.now().isoformat(timespec="seconds"), entry_id),
             )
+        history_add("updated", entry_snapshot(entry_id), entry_id)
         backup_db("entry-update")
         return jsonify({"ok": True})
     except sqlite3.IntegrityError:
@@ -646,8 +692,10 @@ def api_entries_update(entry_id):
 @app.delete("/api/entries/<int:entry_id>")
 @login_required
 def api_entries_delete(entry_id):
+    snap=entry_snapshot(entry_id)
     with db() as conn:
         conn.execute("DELETE FROM entries WHERE id=?", (entry_id,))
+    if snap: history_add("deleted", snap, entry_id)
     backup_db("entry-delete")
     return jsonify({"ok": True})
 
@@ -705,35 +753,31 @@ def parse_batch_payload():
         "start_time": start_time,
         "end_time": end_time,
         "days": days,
+        "skip_vacations": bool(payload.get("skip_vacations", False)),
+        "skip_holidays": bool(payload.get("skip_holidays", False)),
     }, None
 
 
 def batch_preview_data(batch):
-    days = batch["days"]
-    occupied = []
+    days=batch["days"]
+    occupied=[]; excluded={}
     if days:
-        placeholders = ",".join("?" for _ in days)
+        placeholders=",".join("?" for _ in days)
         with db() as conn:
-            rows = conn.execute(
-                f"""SELECT e.day,p.name AS person
-                    FROM entries e
-                    JOIN people p ON p.id=e.person_id
-                    WHERE e.day IN ({placeholders})
-                    ORDER BY e.day""",
-                tuple(days),
-            ).fetchall()
-        occupied = [dict(r) for r in rows]
-
-    occupied_days = {r["day"] for r in occupied}
-    create_days = [d for d in days if d not in occupied_days]
-    return {
-        "matched_count": len(days),
-        "create_count": len(create_days),
-        "skipped_count": len(occupied),
-        "occupied": occupied,
-        "first_day": days[0] if days else None,
-        "last_day": days[-1] if days else None,
-    }
+            rows=conn.execute(f"SELECT e.day,p.name AS person FROM entries e JOIN people p ON p.id=e.person_id WHERE e.day IN ({placeholders}) ORDER BY e.day",tuple(days)).fetchall()
+            occupied=[dict(r) for r in rows]
+            if batch["skip_vacations"] or batch["skip_holidays"]:
+                kinds=[]
+                if batch["skip_vacations"]: kinds.append("vacation")
+                if batch["skip_holidays"]: kinds.append("holiday")
+                ph=",".join("?" for _ in kinds)
+                prs=conn.execute(f"SELECT start_day,end_day,kind FROM periods WHERE kind IN ({ph})",tuple(kinds)).fetchall()
+                for d in days:
+                    hits={r["kind"] for r in prs if r["start_day"]<=d<=r["end_day"]}
+                    if hits: excluded[d]=hits
+    occupied_days={r["day"] for r in occupied}
+    create_days=[d for d in days if d not in occupied_days and d not in excluded]
+    return {"matched_count":len(days),"create_count":len(create_days),"skipped_count":len(days)-len(create_days),"occupied":occupied,"vacation_count":sum("vacation" in x for x in excluded.values()),"holiday_count":sum("holiday" in x for x in excluded.values()),"create_days":create_days,"first_day":days[0] if days else None,"last_day":days[-1] if days else None}
 
 
 @app.post("/api/entries/batch/preview")
@@ -757,10 +801,11 @@ def api_entries_batch_create():
     if error:
         return jsonify({"error": error}), 400
 
+    preview=batch_preview_data(batch)
     now = datetime.now().isoformat(timespec="seconds")
     created = 0
     with db() as conn:
-        for day in batch["days"]:
+        for day in preview["create_days"]:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
                    VALUES(?,?,?,?,?,?,?,?)""",
@@ -777,6 +822,8 @@ def api_entries_batch_create():
         "matched_count": len(batch["days"]),
         "created_count": created,
         "skipped_count": len(batch["days"]) - created,
+        "vacation_count": preview["vacation_count"],
+        "holiday_count": preview["holiday_count"],
     }), 201 if created else 200
 
 
@@ -1712,7 +1759,7 @@ def entry_ics_event_lines(r, host):
             f"DTEND:{end_day_compact}T{end_compact}00",
         ])
     lines.extend([
-        f"SUMMARY:{ics_escape(r['person'])}",
+        f"SUMMARY:{ics_escape(get_setting('ical_title_template','{person}').replace('{person}', str(r['person'])).replace('{app}', APP_TITLE))}",
         f"DESCRIPTION:{ics_escape(r['note'])}",
         "CATEGORIES:Betreuung",
         "STATUS:CONFIRMED",
@@ -1789,6 +1836,35 @@ def calendar_ics():
     body = build_ics_calendar(rows, host, calendar_name)
     return Response(body, mimetype="text/calendar; charset=utf-8")
 
+
+@app.get("/api/history")
+@login_required
+def api_history():
+    with db() as conn:
+        rows=conn.execute("SELECT id,action,entry_id,snapshot,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
+    out=[]
+    for r in rows:
+        x=dict(r); x["snapshot"]=json.loads(x["snapshot"] or "{}")
+        out.append(x)
+    return jsonify(out)
+
+@app.post("/api/history/<int:history_id>/restore")
+@login_required
+def api_history_restore(history_id):
+    with db() as conn:
+        h=conn.execute("SELECT * FROM history WHERE id=?",(history_id,)).fetchone()
+    if not h or h["action"]!="deleted": return jsonify({"error":"Dieser Eintrag kann nicht wiederhergestellt werden"}),400
+    snap=json.loads(h["snapshot"] or "{}")
+    if not snap.get("day") or not snap.get("person_id"): return jsonify({"error":"Unvollständiger Verlaufseintrag"}),400
+    now=datetime.now().isoformat(timespec="seconds")
+    try:
+        with db() as conn:
+            cur=conn.execute("INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",(snap["day"],snap["person_id"],snap.get("note","") ,snap.get("all_day",1),snap.get("start_time","") ,snap.get("end_time","") ,now,now))
+            eid=cur.lastrowid
+        history_add("restored",entry_snapshot(eid),eid); backup_db("entry-restore")
+        return jsonify({"ok":True,"id":eid})
+    except sqlite3.IntegrityError:
+        return jsonify({"error":"Für dieses Datum gibt es bereits einen Eintrag"}),409
 
 @app.get("/api/stats")
 @login_required

@@ -106,6 +106,17 @@ Die Jahresübersicht ist über **Drucken / PDF** für A4 Querformat optimiert. F
 
 Wenn die App übers Internet erreichbar ist, HTTPS verwenden. Bei `AUTH_ENABLED=false` hat jeder, der die App über Netzwerk/Reverse Proxy erreichen kann, vollen Zugriff auf die Betreuungsdaten. Deshalb den Zugriff über Firewall, VPN, Reverse-Proxy-Authentifizierung oder ein internes Netz begrenzen.
 
+
+### Name beim einmaligen ICS-Export
+
+Der Kalendername (`X-WR-CALNAME`) des Zeitraum-/Jahresexports kann per Environment-Variable gesetzt werden:
+
+```yaml
+- ICAL_EXPORT_NAME=Betreuung Noemi
+```
+
+Ohne gesetzten Wert wird `Betreuungsplan` verwendet. Die Titel der einzelnen Termine werden weiterhin aus dem persönlichen iCal-Titel der Betreuungsperson bzw. dem globalen Titel-Template erzeugt.
+
 ## iCal / Cloudflare Access
 
 Für alle intern erzeugten Kalender-Links wird HTTPS verwendet. Empfohlen ist im Stack:

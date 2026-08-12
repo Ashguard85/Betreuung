@@ -40,6 +40,7 @@ APP_USER = os.getenv("APP_USER", "familie")
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 ICAL_TOKEN = os.getenv("ICAL_TOKEN", "")
 APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
+ICAL_EXPORT_NAME = os.getenv("ICAL_EXPORT_NAME", "Betreuungsplan").strip() or "Betreuungsplan"
 
 if AUTH_ENABLED and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD muss gesetzt sein, wenn AUTH_ENABLED=true ist.")
@@ -2198,10 +2199,9 @@ def export_ics_range():
     search = request.args.get("q", "").strip()
     rows = rows_for_calendar_range(start_day, end_day, people, search)
     host = request.host.split(":")[0]
-    if len(people) == 1:
-        calendar_name = f"{APP_TITLE} – {people[0]}"
-    else:
-        calendar_name = f"{APP_TITLE} – {start_day} bis {end_day}"
+    # The one-time ICS export uses a dedicated configurable calendar name.
+    # This is independent from the individual event titles.
+    calendar_name = ICAL_EXPORT_NAME
     body = build_ics_calendar(rows, host, calendar_name)
     filename = f"betreuung-{start_day}-bis-{end_day}.ics"
     disposition = "inline" if request.args.get("open") == "1" else "attachment"

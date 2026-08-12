@@ -2204,14 +2204,16 @@ def export_ics_range():
         calendar_name = f"{APP_TITLE} – {start_day} bis {end_day}"
     body = build_ics_calendar(rows, host, calendar_name)
     filename = f"betreuung-{start_day}-bis-{end_day}.ics"
+    disposition = "inline" if request.args.get("open") == "1" else "attachment"
     return Response(
         body,
         mimetype="text/calendar; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
             "Cache-Control": "private, no-store, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

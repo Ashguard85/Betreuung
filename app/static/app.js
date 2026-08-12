@@ -291,8 +291,11 @@ function updateExportControls(){
   const params=exportParams();
   qs("#listCsvLink").href=`/export.csv?${params.toString()}`;
   qs("#listPdfButton").dataset.url=`/export.pdf?${params.toString()}`;
+  const rangeQuery=calendarRangeParams().toString();
   const icsButton=qs("#listIcsButton");
-  if(icsButton) icsButton.dataset.url=`/export.ics?${calendarRangeParams().toString()}`;
+  if(icsButton) icsButton.dataset.url=`/export.ics?${rangeQuery}`;
+  const appleButton=qs("#listAppleCalendarButton");
+  if(appleButton) appleButton.dataset.url=`/export.ics?${rangeQuery}${rangeQuery?"&":""}open=1`;
   const button=qs("#listExportPeople");
   if(button){
     if(exportPeopleAreAll()) button.textContent="Personen: Alle";
@@ -1011,6 +1014,16 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     if(!from || !to) return toast("Von und Bis wählen");
     if(from>to) return toast("Von liegt nach Bis");
     shareServerFile(qs("#listIcsButton").dataset.url,`betreuung-${from}-bis-${to}.ics`,"text/calendar","Kalenderdatei wird erstellt …");
+  });
+  qs("#listAppleCalendarButton")?.addEventListener("click",()=>{
+    const from=qs("#listRangeFrom").value, to=qs("#listRangeTo").value;
+    if(!from || !to) return toast("Von und Bis wählen");
+    if(from>to) return toast("Von liegt nach Bis");
+    const url=qs("#listAppleCalendarButton").dataset.url;
+    if(!url) return;
+    // Direct navigation is intentional: iOS handles an inline text/calendar response
+    // more reliably than a File object shared from an installed PWA.
+    window.location.href=url;
   });
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});

@@ -547,3 +547,10 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
 .calendar-range-grid .date-shell{width:100%;max-width:none}.calendar-range-grid input[type=date]{width:100%;max-width:none}
 .list-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.list-actions .secondary,.list-actions .linkbtn{flex:0 0 auto}.list-actions #listExportHint{flex:1 1 100%}
 @media(max-width:430px){.calendar-range-export{padding:10px}.calendar-range-grid{gap:8px}.list-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.list-actions .secondary,.list-actions .linkbtn{width:100%;justify-content:center;padding-left:7px;padding-right:7px;font-size:12px}.list-actions #listExportHint{grid-column:1/-1}}
+
+.apple-calendar-button{white-space:nowrap}
+@media(max-width:480px){
+  .list-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .list-actions .secondary,.list-actions .linkbtn{width:100%;min-width:0;justify-content:center;text-align:center}
+  .list-actions #listExportHint{grid-column:1/-1}
+}

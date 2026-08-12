@@ -473,7 +473,8 @@ def entry_rows(where="", params=()):
     query = """
       SELECT e.id, e.day, e.note, e.all_day, e.start_time, e.end_time,
              e.created_at, e.updated_at,
-             p.id AS person_id, p.name AS person, p.color AS color
+             p.id AS person_id, p.name AS person, p.color AS color,
+             p.ical_title AS ical_title
       FROM entries e
       JOIN people p ON p.id = e.person_id
     """
@@ -2096,9 +2097,7 @@ def import_data_json():
 def ical_event_title(r):
     """Resolve per-person iCal title first, then fall back to the global template."""
     person = str(r["person"])
-    with db() as conn:
-        row = conn.execute("SELECT ical_title FROM people WHERE name=?", (person,)).fetchone()
-    custom = str(row["ical_title"] if row else "").strip()
+    custom = str(r.get("ical_title") or "").strip()
     template = custom or get_setting("ical_title_template", "{person}")
     return template.replace("{person}", person).replace("{app}", APP_TITLE)
 

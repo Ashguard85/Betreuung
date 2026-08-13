@@ -174,3 +174,28 @@ Setup-Bereiche sind einklappbar, Kalenderlinks werden vollständig umbrochen ang
 ## Kalenderexport eines Zeitraums
 
 In der Listenansicht kann ein frei gewählter Zeitraum als einmalige `.ics`-Datei exportiert werden. Die aktuelle Personenauswahl und Suche werden übernommen. So kann z. B. nach abgeschlossener Planung das komplette Jahr 01.01.–31.12. in Outlook, Apple Kalender oder andere iCalendar-kompatible Programme importiert werden. Nachtbetreuungen, die vom Vortag in den gewählten Zeitraum hineinreichen, werden ebenfalls berücksichtigt.
+
+## Native iPhone/iPad-App (Capacitor)
+
+Unter `mobile/` liegt zusätzlich ein lokaler iOS-Client. Die Oberfläche wird in die App gebündelt; Daten werden weiterhin direkt von dieser Flask-Instanz geladen. Beim ersten Start werden Server-URL sowie Cloudflare Access Client ID/Client Secret eingegeben. Unter iOS werden diese Daten im System-Keychain gespeichert und bei Requests an den konfigurierten Server als Service-Token-Header mitgesendet.
+
+Die bestehende Docker-/PWA-Version bleibt unverändert. Anleitung für Build und Installation: `mobile/README_IOS.md`.
+
+
+## v40 – getrennte GitHub-Pages-PWA
+
+Der Docker-/Flask-Server bleibt vollständig hinter Cloudflare Access. Das statische iPhone-Frontend liegt in einem separaten GitHub-Pages-Repository.
+
+Für den Server im Portainer-Stack ergänzen:
+
+```text
+AUTH_ENABLED=false
+PWA_ALLOWED_ORIGIN=https://betreuung2.DEINE-DOMAIN.TLD
+APP_URL=https://betreuung.DEINE-DOMAIN.TLD
+```
+
+`PWA_ALLOWED_ORIGIN` ist absichtlich exakt ein Origin; kein `*`. Bei leerem Wert werden keine Cross-Origin-Antworten freigegeben.
+
+Cloudflare Access bleibt die Authentifizierungsschicht. Für die bestehende Weboberfläche kann OTP/Allow verwendet werden; zusätzlich kann eine `Service Auth`-Policy das Service Token der externen PWA akzeptieren. Die PWA sendet `CF-Access-Client-ID` und `CF-Access-Client-Secret` bei jedem Serverrequest.
+
+Wichtig: Wenn `AUTH_ENABLED=true` gesetzt ist, verlangt Flask zusätzlich eine eigene Session-Anmeldung. Für den beschriebenen Cloudflare-Aufbau deshalb `AUTH_ENABLED=false` verwenden und den Origin ausschließlich über Cloudflare Tunnel/Access veröffentlichen.

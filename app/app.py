@@ -41,6 +41,7 @@ APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 ICAL_TOKEN = os.getenv("ICAL_TOKEN", "")
 APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 ICAL_EXPORT_NAME = os.getenv("ICAL_EXPORT_NAME", "Betreuungsplan").strip() or "Betreuungsplan"
+PWA_ALLOWED_ORIGIN = os.getenv("PWA_ALLOWED_ORIGIN", "").strip().rstrip("/")
 
 if AUTH_ENABLED and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD muss gesetzt sein, wenn AUTH_ENABLED=true ist.")
@@ -54,6 +55,28 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
+
+
+@app.after_request
+def add_pwa_cors_headers(response):
+    """Allow only the explicitly configured GitHub Pages PWA origin.
+
+    Cloudflare Access should answer unauthenticated OPTIONS preflight requests at
+    the edge. These headers are still required on the actual Flask responses.
+    """
+    if not PWA_ALLOWED_ORIGIN:
+        return response
+    origin = (request.headers.get("Origin") or "").strip().rstrip("/")
+    if origin != PWA_ALLOWED_ORIGIN:
+        return response
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, CF-Access-Client-ID, CF-Access-Client-Secret"
+    response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Type"
+    response.headers["Access-Control-Max-Age"] = "86400"
+    return response
+
 
 backup_lock = threading.Lock()
 

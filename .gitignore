@@ -3,3 +3,7 @@ __pycache__/
 .env
 data/
 .DS_Store
+
+# Native iOS client build output
+mobile/node_modules/
+mobile/dist/

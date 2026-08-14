@@ -1,4 +1,4 @@
-const APP_VERSION = "43";
+const APP_VERSION = "46";
 const VERSION = `betreuung-pwa-v${APP_VERSION}`;
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = "betreuung-private-data-v1";
@@ -7,8 +7,8 @@ const INDEX_URL = "/";
 
 const ESSENTIAL_SHELL = [
   "/",
-  "/static/app.css?v=43",
-  "/static/app.js?v=43",
+  "/static/app.css?v=46",
+  "/static/app.js?v=46",
   "/manifest.webmanifest"
 ];
 
@@ -46,9 +46,18 @@ async function precacheShell() {
   }
 }
 
+async function needsOneTimeCacheRecovery(){
+  const keys=await caches.keys();
+  return keys.some(key => /^betreuung-pwa-v(?:43|44|45)-shell$/.test(key));
+}
+
 self.addEventListener("install", event => {
-  // No automatic skipWaiting: the current session remains on its known-good shell.
-  event.waitUntil(precacheShell());
+  event.waitUntil((async()=>{
+    await precacheShell();
+    // One-time migration from the v43-v45 cache-first architecture. The new
+    // worker becomes active, but does not claim/reload the currently open client.
+    if(await needsOneTimeCacheRecovery()) await self.skipWaiting();
+  })());
 });
 
 async function migrateLegacyDataCaches(keys) {
@@ -145,7 +154,8 @@ self.addEventListener("fetch", event => {
       url.pathname === "/apple-touch-icon-precomposed.png" || url.pathname === "/favicon-v17.png" ||
       url.pathname === "/favicon.ico" || url.pathname.startsWith("/pwa-icon-")) {
     event.respondWith((async () => {
-      const cached = await caches.match(request);
+      const cache = await caches.open(SHELL_CACHE);
+      const cached = await cache.match(request);
       if (cached) return cached;
       try { return await fetch(request); } catch (_error) { return Response.error(); }
     })());

@@ -1,3 +1,7 @@
+# v46 – Service-Worker Cache-Recovery
+
+Die Fullstack-PWA verwendet dieselbe sichere Update-Logik wie das Pages-Frontend: einmalige Recovery von v43-v45, danach sichere Aktivierung vollständig geladener Updates beim nächsten App-Start. Keine `clients.claim()`-Übernahme und keine unkontrollierten Reloads.
+
 # Betreuungsplan
 
 Kleine iPhone-first PWA für einen einfachen Betreuungsplan.
@@ -190,11 +194,11 @@ Für den Server im Portainer-Stack ergänzen:
 
 ```text
 AUTH_ENABLED=false
-PWA_ALLOWED_ORIGIN=https://betreuung2.DEINE-DOMAIN.TLD
+PWA_ALLOWED_ORIGINS=https://betreuung2.DEINE-DOMAIN.TLD
 APP_URL=https://betreuung.DEINE-DOMAIN.TLD
 ```
 
-`PWA_ALLOWED_ORIGIN` ist absichtlich exakt ein Origin; kein `*`. Bei leerem Wert werden keine Cross-Origin-Antworten freigegeben.
+`PWA_ALLOWED_ORIGINS` akzeptiert eine kommaseparierte Liste expliziter Origins; kein `*`. `PWA_ALLOWED_ORIGIN` bleibt rückwärtskompatibel. Bei leeren Werten werden keine Cross-Origin-Antworten freigegeben.
 
 Cloudflare Access bleibt die Authentifizierungsschicht. Für die bestehende Weboberfläche kann OTP/Allow verwendet werden; zusätzlich kann eine `Service Auth`-Policy das Service Token der externen PWA akzeptieren. Die PWA sendet `CF-Access-Client-ID` und `CF-Access-Client-Secret` bei jedem Serverrequest.
 
@@ -210,3 +214,8 @@ Wichtig: Wenn `AUTH_ENABLED=true` gesetzt ist, verlangt Flask zusätzlich eine e
 - Im Setup werden App-Version und ein optionaler „Jetzt aktualisieren“-Button angezeigt. Der Button wird bei laufenden Schreib-/Importvorgängen oder offenen Dialogen blockiert.
 - Die aktive Hauptansicht wird in `sessionStorage` gemerkt und nach einem kontrollierten Reload wiederhergestellt.
 - Bestehende SQLite-Daten, Browser-Speicher und Benutzerkonfigurationen werden durch das Update nicht verändert.
+
+
+### iPhone/Home-Screen-PWA
+
+Für Cloudflare Access wird empfohlen, `OPTIONS` zum Origin durchzulassen (**Bypass OPTIONS requests to origin**) und CORS durch Flask mit `PWA_ALLOWED_ORIGINS` zu erzwingen. Dadurch können Browser- und installierte PWA-Origins gezielt und nachvollziehbar freigegeben werden.

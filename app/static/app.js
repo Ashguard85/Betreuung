@@ -880,7 +880,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "43";
+const PWA_APP_VERSION = "46";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;
@@ -888,6 +888,7 @@ let pwaWriteOperations = 0;
 let pwaDirtySinceLoad = false;
 let pwaLastUpdateCheck = 0;
 let pwaReloadTimer = null;
+let pwaReloadIssued = false;
 let pwaBackendReachable = true;
 
 function setBackendReachable(value){
@@ -954,22 +955,44 @@ async function checkPwaUpdate(force=false){
   try{await pwaRegistration.update();}catch(_error){}
 }
 
+function reloadOnceForPwaUpdate(){
+  if(pwaReloadIssued) return;
+  let requested=false;
+  try{requested=sessionStorage.getItem(PWA_UPDATE_RELOAD_KEY)==="1";}catch(_e){}
+  if(!requested) return;
+  pwaReloadIssued=true;
+  try{sessionStorage.removeItem(PWA_UPDATE_RELOAD_KEY);}catch(_e){}
+  clearTimeout(pwaReloadTimer);
+  location.reload();
+}
+
+function activateWaitingWorker(worker,{startup=false}={}){
+  if(!worker) return false;
+  pwaWaitingWorker=worker;
+  try{sessionStorage.setItem(PWA_UPDATE_RELOAD_KEY,"1");}catch(_e){}
+  const onState=()=>{
+    if(worker.state==="activated") reloadOnceForPwaUpdate();
+  };
+  worker.addEventListener("statechange",onState);
+  setPwaUpdateStatus(startup?"Bereits geladene neue Version wird sicher aktiviert …":"Update wird sicher aktiviert …",false);
+  try{worker.postMessage({type:"ACTIVATE_UPDATE",userInitiated:true});}
+  catch(_e){return false;}
+  if(worker.state==="activated") reloadOnceForPwaUpdate();
+  clearTimeout(pwaReloadTimer);
+  pwaReloadTimer=setTimeout(()=>{
+    // No forced loop: if iOS delays activation, keep the current version stable.
+    try{sessionStorage.removeItem(PWA_UPDATE_RELOAD_KEY);}catch(_e){}
+    setPwaUpdateStatus("Update ist vollständig geladen und wird beim nächsten sicheren Start übernommen.",false);
+  },10000);
+  return true;
+}
+
 async function applyPwaUpdate(){
   if(!pwaWaitingWorker){setPwaUpdateStatus("Keine wartende Version gefunden.",false);return;}
   const reason=pwaCriticalUpdateReason();
   if(reason){toast(reason);return;}
   if(pwaDirtySinceLoad && !confirm("Seit dem Start wurden Eingaben geändert. Jetzt aktualisieren? Nicht gespeicherte Eingaben können verloren gehen.")) return;
-
-  // Only a user-triggered update is allowed to activate over the current client.
-  try{sessionStorage.setItem(PWA_UPDATE_RELOAD_KEY,"1");}catch(_e){}
-  setPwaUpdateStatus("Update wird sicher aktiviert …",false);
-  pwaWaitingWorker.postMessage({type:"ACTIVATE_UPDATE",userInitiated:true});
-
-  clearTimeout(pwaReloadTimer);
-  pwaReloadTimer=setTimeout(()=>{
-    try{sessionStorage.removeItem(PWA_UPDATE_RELOAD_KEY);}catch(_e){}
-    setPwaUpdateStatus("Update ist geladen und wird beim nächsten Neustart aktiv.",false);
-  },8000);
+  activateWaitingWorker(pwaWaitingWorker,{startup:false});
 }
 
 function wirePwaUpdateUi(){
@@ -978,12 +1001,9 @@ function wirePwaUpdateUi(){
   document.addEventListener("input",markPotentialUnsavedInput,true);
   document.addEventListener("change",markPotentialUnsavedInput,true);
   navigator.serviceWorker?.addEventListener("controllerchange",()=>{
-    let requested=false;
-    try{requested=sessionStorage.getItem(PWA_UPDATE_RELOAD_KEY)==="1";}catch(_e){}
-    if(!requested) return;
-    try{sessionStorage.removeItem(PWA_UPDATE_RELOAD_KEY);}catch(_e){}
-    clearTimeout(pwaReloadTimer);
-    location.reload();
+    // Some browsers switch the controller immediately, others only after navigation.
+    // The one-shot guard prevents duplicate reloads if statechange fires as well.
+    reloadOnceForPwaUpdate();
   });
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkPwaUpdate(false);});
 }
@@ -1042,6 +1062,12 @@ async function registerPwa(){
   try{
     const reg=await navigator.serviceWorker.register("/service-worker.js",{scope:"/",updateViaCache:"none"});
     pwaRegistration=reg;
+    // A fully downloaded update left waiting from the previous session is safe to
+    // activate now: startup has not loaded data or accepted user input yet.
+    if(reg.waiting && navigator.serviceWorker.controller){
+      activateWaitingWorker(reg.waiting,{startup:true});
+      return "activating";
+    }
     if(reg.waiting) announceWaitingWorker(reg.waiting);
     reg.addEventListener("updatefound",()=>{
       const worker=reg.installing;

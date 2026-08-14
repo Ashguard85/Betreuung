@@ -18,9 +18,13 @@ Am besten pro Gerät ein separates Service Token erstellen.
 
 ## CORS / Preflight
 
-Die PWA läuft auf einem anderen Origin. Browser senden deshalb vor Requests mit den Cloudflare-Service-Token-Headern einen anonymen `OPTIONS`-Preflight. In der Access Application die CORS-Preflight-Behandlung am Cloudflare Edge aktivieren und nicht den Origin pauschal öffentlich machen.
+Die PWA läuft auf einem anderen Origin. Browser senden deshalb vor Requests mit den Cloudflare-Service-Token-Headern einen anonymen `OPTIONS`-Preflight.
 
-Erlaubte Werte:
+**Empfohlen für iPhone/Home-Screen-PWA:** In der Access Application unter **Advanced settings → Cross-Origin Resource Sharing (CORS)** die Option **Bypass OPTIONS requests to origin** aktivieren. Flask beantwortet den Preflight und prüft den Origin gegen `PWA_ALLOWED_ORIGINS`. Dadurch muss Cloudflare nicht selbst einen einzelnen Browser-Origin nachbilden.
+
+Der Origin darf weiterhin niemals pauschal mit `*` freigegeben werden.
+
+Flask liefert für erlaubte Origins:
 
 ```text
 Access-Control-Allow-Origin: https://betreuung2.DEINE-DOMAIN.TLD
@@ -30,11 +34,19 @@ Access-Control-Expose-Headers: Content-Disposition, Content-Type
 Access-Control-Max-Age: 86400
 ```
 
-Im Container muss derselbe PWA-Origin stehen:
+Im Container muss der von der Pages-PWA angezeigte Origin stehen:
 
 ```text
-PWA_ALLOWED_ORIGIN=https://betreuung2.DEINE-DOMAIN.TLD
+PWA_ALLOWED_ORIGINS=https://betreuung2.DEINE-DOMAIN.TLD
 ```
+
+Mehrere explizite Origins sind kommasepariert möglich, z. B. bei einer älteren bereits installierten PWA:
+
+```text
+PWA_ALLOWED_ORIGINS=https://betreuung2.DEINE-DOMAIN.TLD,https://ashguard85.github.io
+```
+
+Die bisherige Variable `PWA_ALLOWED_ORIGIN` bleibt weiterhin unterstützt.
 
 ## iCal-Abos
 

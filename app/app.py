@@ -42,6 +42,12 @@ ICAL_TOKEN = os.getenv("ICAL_TOKEN", "")
 APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 ICAL_EXPORT_NAME = os.getenv("ICAL_EXPORT_NAME", "Betreuungsplan").strip() or "Betreuungsplan"
 PWA_ALLOWED_ORIGIN = os.getenv("PWA_ALLOWED_ORIGIN", "").strip().rstrip("/")
+PWA_ALLOWED_ORIGINS_RAW = os.getenv("PWA_ALLOWED_ORIGINS", "").strip()
+PWA_ALLOWED_ORIGINS = {
+    value.strip().rstrip("/")
+    for value in ([*PWA_ALLOWED_ORIGINS_RAW.split(","), PWA_ALLOWED_ORIGIN])
+    if value.strip()
+}
 
 if AUTH_ENABLED and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD muss gesetzt sein, wenn AUTH_ENABLED=true ist.")
@@ -64,10 +70,10 @@ def add_pwa_cors_headers(response):
     Cloudflare Access should answer unauthenticated OPTIONS preflight requests at
     the edge. These headers are still required on the actual Flask responses.
     """
-    if not PWA_ALLOWED_ORIGIN:
+    if not PWA_ALLOWED_ORIGINS:
         return response
     origin = (request.headers.get("Origin") or "").strip().rstrip("/")
-    if origin != PWA_ALLOWED_ORIGIN:
+    if origin not in PWA_ALLOWED_ORIGINS:
         return response
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Vary"] = "Origin"

@@ -11,22 +11,27 @@ let exportPeopleAllSelected = true;
 const YEAR_MONTH_NAMES = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 let yearMonths = Array.from({length:12},(_,i)=>i+1);
 let editingId = null;
-let reloadingForServiceWorker = false;
 
 const qs = s => document.querySelector(s);
 const qsa = s => [...document.querySelectorAll(s)];
 
 async function api(url, options={}) {
   const method=(options.method||"GET").toUpperCase();
-  if(method!=="GET" && !navigator.onLine) throw new Error("Offline - Änderungen sind nicht möglich");
+  const write=method!=="GET" && method!=="HEAD" && method!=="OPTIONS";
+  if(write && !serverWriteAvailable()) throw new Error(navigator.onLine ? "Datenserver nicht erreichbar - Änderungen sind nicht möglich" : "Offline - Änderungen sind nicht möglich");
   let res;
+  if(write) beginPwaWrite();
   try {
     res = await fetch(url, {
       headers: {"Content-Type":"application/json", ...(options.headers||{})},
       ...options
     });
+    setBackendReachable(res.headers.get("X-PWA-Offline-Cache")!=="1");
   } catch (err) {
+    setBackendReachable(false);
     throw new Error(navigator.onLine ? "Server nicht erreichbar" : "Offline - noch keine lokal gespeicherten Daten verfügbar");
+  } finally {
+    if(write) endPwaWrite();
   }
   if (res.status === 401) {
     if(navigator.onLine) location.href="/login";
@@ -216,14 +221,20 @@ function renderPersonFilter(){
   }
   updateExportControls();
 }
-function showPage(name){
+const PWA_PAGE_KEY = "betreuung-current-page";
+function rememberPage(name){try{sessionStorage.setItem(PWA_PAGE_KEY,name);}catch(_e){}}
+function rememberedPage(){try{return sessionStorage.getItem(PWA_PAGE_KEY)||"home";}catch(_e){return "home";}}
+function showPage(name,{persist=true,scroll=true}={}){
+  const page=qs("#"+name+"Page");
+  if(!page) name="home";
   qsa(".page").forEach(p=>p.classList.remove("active"));
-  qs("#"+name+"Page").classList.add("active");
+  qs("#"+name+"Page")?.classList.add("active");
   qsa(".navbtn").forEach(b=>b.classList.toggle("active",b.dataset.page===name));
+  if(persist) rememberPage(name);
   if(name==="list") renderList();
   if(name==="year"){ renderYear(); renderStatsByPerson(); }
   if(name==="settings"){ loadConfig(); renderPeriodSettings(); }
-  window.scrollTo({top:0,behavior:"smooth"});
+  if(scroll) window.scrollTo({top:0,behavior:"smooth"});
 }
 function renderNext(){
   const today=isoToday();
@@ -806,7 +817,7 @@ async function shareServerPdf(url, fallbackName="betreuungsplan.pdf"){
   if(!navigator.onLine){toast("PDF benötigt eine Serververbindung");return;}
   try{
     toast("PDF wird erstellt …");
-    const response=await fetch(url,{credentials:"same-origin",cache:"no-store"});
+    const response=await trackedPwaFetch(url,{credentials:"same-origin",cache:"no-store"});
     if(response.status===401){location.href="/login";return;}
     if(!response.ok) throw new Error(`PDF konnte nicht erstellt werden (HTTP ${response.status})`);
     const blob=await response.blob();
@@ -846,7 +857,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
   if(!navigator.onLine){toast("Teilen benötigt eine Serververbindung");return;}
   try{
     toast(preparing);
-    const response=await fetch(url,{credentials:"same-origin",cache:"no-store"});
+    const response=await trackedPwaFetch(url,{credentials:"same-origin",cache:"no-store"});
     if(response.status===401){location.href="/login";return;}
     if(!response.ok) throw new Error(`Export fehlgeschlagen (HTTP ${response.status})`);
     const blob=await response.blob();
@@ -868,55 +879,185 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
   }catch(error){console.error(error);toast(error.message || "Export fehlgeschlagen");}
 }
 
-function applyOnlineState(){
-  const online=navigator.onLine;
-  document.body.classList.toggle("is-offline",!online);
-  const banner=qs("#offlineBanner");
-  if(banner) banner.hidden=online;
-  ["#quickSave","#modalSave","#modalDuplicate","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
-    const el=qs(sel); if(el) el.disabled=!online;
-  });
-  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#subName,#subUrl,#subKind,#subColor,#addSubscription,#subscriptionList button,#subscriptionList input,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!online);
-  const batchCreate=qs("#batchCreate");
-  if(batchCreate) batchCreate.disabled=!online || !batchPreviewKey;
-  qsa(".server-export").forEach(el=>{
-    el.setAttribute("aria-disabled",online?"false":"true");
-    el.tabIndex=online?0:-1;
-    if("disabled" in el) el.disabled=!online;
+
+const PWA_APP_VERSION = "43";
+const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
+let pwaRegistration = null;
+let pwaWaitingWorker = null;
+let pwaWriteOperations = 0;
+let pwaDirtySinceLoad = false;
+let pwaLastUpdateCheck = 0;
+let pwaReloadTimer = null;
+let pwaBackendReachable = true;
+
+function setBackendReachable(value){
+  const next=Boolean(value);
+  if(pwaBackendReachable===next) return;
+  pwaBackendReachable=next;
+  try{applyOnlineState();}catch(_e){}
+}
+
+function serverWriteAvailable(){return navigator.onLine && pwaBackendReachable;}
+
+function setPwaUpdateStatus(text, updateAvailable=false){
+  const versionEl=qs("#pwaAppVersion");
+  const statusEl=qs("#pwaUpdateStatus");
+  const button=qs("#pwaApplyUpdate");
+  if(versionEl) versionEl.textContent=`v${PWA_APP_VERSION}`;
+  if(statusEl) statusEl.textContent=text||"";
+  if(button) button.hidden=!updateAvailable;
+}
+
+function beginPwaWrite(){ pwaWriteOperations += 1; }
+function endPwaWrite(){ pwaWriteOperations = Math.max(0, pwaWriteOperations-1); }
+
+function markPotentialUnsavedInput(event){
+  const target=event.target;
+  if(!(target instanceof HTMLElement)) return;
+  if(!target.matches("input,textarea,select")) return;
+  if(target.matches("#filterSearch,#filterYear,#yearSelect,#listRangeFrom,#listRangeTo")) return;
+  pwaDirtySinceLoad=true;
+}
+
+function pwaCriticalUpdateReason(){
+  if(pwaWriteOperations>0) return "Es läuft gerade ein Schreib-, Import- oder Restore-Vorgang.";
+  if(document.querySelector(".modalback.open")) return "Bitte zuerst den geöffneten Dialog schließen oder speichern.";
+  const selectedFile=[...document.querySelectorAll('input[type="file"]')].some(input=>input.files?.length);
+  if(selectedFile) return "Bitte zuerst den ausgewählten Datei-Import abschließen oder die Datei entfernen.";
+  return "";
+}
+
+function queryWorkerVersion(worker){
+  return new Promise(resolve=>{
+    if(!worker) return resolve("");
+    const channel=new MessageChannel();
+    const timer=setTimeout(()=>resolve(""),1200);
+    channel.port1.onmessage=event=>{clearTimeout(timer);resolve(String(event.data?.version||""));};
+    try{worker.postMessage({type:"GET_VERSION"},[channel.port2]);}
+    catch(_error){clearTimeout(timer);resolve("");}
   });
 }
 
+async function announceWaitingWorker(worker){
+  if(!worker) return;
+  pwaWaitingWorker=worker;
+  const version=await queryWorkerVersion(worker);
+  const label=version?`v${version}`:"eine neue Version";
+  setPwaUpdateStatus(`Neue Version verfügbar: ${label}. Sie ist bereits lokal geladen.`,true);
+}
+
+async function checkPwaUpdate(force=false){
+  if(!pwaRegistration || !navigator.onLine) return;
+  const now=Date.now();
+  if(!force && now-pwaLastUpdateCheck<15*60*1000) return;
+  pwaLastUpdateCheck=now;
+  try{await pwaRegistration.update();}catch(_error){}
+}
+
+async function applyPwaUpdate(){
+  if(!pwaWaitingWorker){setPwaUpdateStatus("Keine wartende Version gefunden.",false);return;}
+  const reason=pwaCriticalUpdateReason();
+  if(reason){toast(reason);return;}
+  if(pwaDirtySinceLoad && !confirm("Seit dem Start wurden Eingaben geändert. Jetzt aktualisieren? Nicht gespeicherte Eingaben können verloren gehen.")) return;
+
+  // Only a user-triggered update is allowed to activate over the current client.
+  try{sessionStorage.setItem(PWA_UPDATE_RELOAD_KEY,"1");}catch(_e){}
+  setPwaUpdateStatus("Update wird sicher aktiviert …",false);
+  pwaWaitingWorker.postMessage({type:"ACTIVATE_UPDATE",userInitiated:true});
+
+  clearTimeout(pwaReloadTimer);
+  pwaReloadTimer=setTimeout(()=>{
+    try{sessionStorage.removeItem(PWA_UPDATE_RELOAD_KEY);}catch(_e){}
+    setPwaUpdateStatus("Update ist geladen und wird beim nächsten Neustart aktiv.",false);
+  },8000);
+}
+
+function wirePwaUpdateUi(){
+  setPwaUpdateStatus("Updates werden im Hintergrund geprüft.",false);
+  qs("#pwaApplyUpdate")?.addEventListener("click",applyPwaUpdate);
+  document.addEventListener("input",markPotentialUnsavedInput,true);
+  document.addEventListener("change",markPotentialUnsavedInput,true);
+  navigator.serviceWorker?.addEventListener("controllerchange",()=>{
+    let requested=false;
+    try{requested=sessionStorage.getItem(PWA_UPDATE_RELOAD_KEY)==="1";}catch(_e){}
+    if(!requested) return;
+    try{sessionStorage.removeItem(PWA_UPDATE_RELOAD_KEY);}catch(_e){}
+    clearTimeout(pwaReloadTimer);
+    location.reload();
+  });
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkPwaUpdate(false);});
+}
+
+async function trackedPwaFetch(url,options={}){
+  const method=String(options.method||"GET").toUpperCase();
+  const write=!(["GET","HEAD","OPTIONS"].includes(method));
+  if(write) beginPwaWrite();
+  try{
+    const response=await fetch(url,options);
+    setBackendReachable(response.headers.get("X-PWA-Offline-Cache")!=="1");
+    return response;
+  }catch(error){setBackendReachable(false);throw error;}
+  finally{if(write) endPwaWrite();}
+}
+
+function applyOnlineState(){
+  const online=navigator.onLine;
+  const serverReady=online && pwaBackendReachable;
+  document.body.classList.toggle("is-offline",!serverReady);
+  const banner=qs("#offlineBanner");
+  if(banner){
+    banner.hidden=serverReady;
+    banner.textContent=!online?"Offline – App-Oberfläche läuft lokal. Änderungen sind deaktiviert.":"Datenserver nicht erreichbar – letzter lesbarer Stand. Änderungen sind deaktiviert.";
+  }
+  ["#quickSave","#modalSave","#modalDuplicate","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
+    const el=qs(sel); if(el) el.disabled=!serverReady;
+  });
+  qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#subName,#subUrl,#subKind,#subColor,#addSubscription,#subscriptionList button,#subscriptionList input,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!serverReady);
+  const batchCreate=qs("#batchCreate");
+  if(batchCreate) batchCreate.disabled=!serverReady || !batchPreviewKey;
+  qsa(".server-export").forEach(el=>{
+    el.setAttribute("aria-disabled",serverReady?"false":"true");
+    el.tabIndex=serverReady?0:-1;
+    if("disabled" in el) el.disabled=!serverReady;
+  });
+}
+
+async function probeBackend(){
+  if(!navigator.onLine) return false;
+  try{
+    const response=await trackedPwaFetch("/api/config",{credentials:"same-origin",cache:"no-store"});
+    setBackendReachable(response.ok || response.status===401 || response.status===403);
+    return pwaBackendReachable;
+  }catch(_e){setBackendReachable(false);return false;}
+}
+
 async function refreshAfterReconnect(){
-  try{await loadPeople();await loadEntries();await loadPeriods();await loadConfig();toast("Wieder online - Daten aktualisiert");}
+  if(!(await probeBackend())) return;
+  try{await loadPeople();await loadEntries();await loadPeriods();await loadConfig();toast("Datenserver wieder erreichbar - Daten aktualisiert");}
   catch(e){toast(e.message);}
 }
 
 async function registerPwa(){
-  if(!("serviceWorker" in navigator)) return;
-  const hadController=Boolean(navigator.serviceWorker.controller);
+  if(!("serviceWorker" in navigator)){setPwaUpdateStatus("Service Worker wird von diesem Browser nicht unterstützt.");return;}
   try{
-    const reg=await navigator.serviceWorker.register("/service-worker.js",{scope:"/"});
-    await reg.update();
-    if(reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
+    const reg=await navigator.serviceWorker.register("/service-worker.js",{scope:"/",updateViaCache:"none"});
+    pwaRegistration=reg;
+    if(reg.waiting) announceWaitingWorker(reg.waiting);
     reg.addEventListener("updatefound",()=>{
       const worker=reg.installing;
       if(!worker)return;
       worker.addEventListener("statechange",()=>{
-        if(worker.state==="installed" && navigator.serviceWorker.controller){
-          worker.postMessage({type:"SKIP_WAITING"});
-        }
+        if(worker.state==="installed" && navigator.serviceWorker.controller) announceWaitingWorker(worker);
+        if(worker.state==="installed" && !navigator.serviceWorker.controller) setPwaUpdateStatus("Offline-Basis installiert. Ab dem nächsten Start läuft die App aus dem lokalen App-Cache.",false);
       });
     });
-    navigator.serviceWorker.addEventListener("controllerchange",()=>{
-      if(!hadController || reloadingForServiceWorker)return;
-      reloadingForServiceWorker=true;
-      location.reload();
-    });
-  }catch(e){console.warn("PWA Service Worker konnte nicht registriert werden",e);}
+    setTimeout(()=>checkPwaUpdate(true),1200);
+  }catch(e){console.warn("PWA Service Worker konnte nicht registriert werden",e);setPwaUpdateStatus("PWA-Updateprüfung momentan nicht verfügbar.",false);}
 }
 
 window.addEventListener("offline",()=>{applyOnlineState();toast("Offline - Änderungen sind deaktiviert");});
-window.addEventListener("online",()=>{applyOnlineState();refreshAfterReconnect();});
+window.addEventListener("online",()=>{applyOnlineState();refreshAfterReconnect();checkPwaUpdate(true);});
+setInterval(()=>{if(navigator.onLine && !pwaBackendReachable) probeBackend();},30000);
 document.addEventListener("click",e=>{
   const pdfButton=e.target.closest(".pdf-share-button");
   if(pdfButton){
@@ -930,6 +1071,7 @@ document.addEventListener("click",e=>{
 });
 
 document.addEventListener("DOMContentLoaded", async ()=>{
+  wirePwaUpdateUi();
   yearOptions(qs("#yearSelect"));
   yearOptions(qs("#filterYear"));
   upgradeDateInputs();
@@ -1056,7 +1198,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     if(!navigator.onLine) return toast("ICS Import benötigt eine Serververbindung");
     const fd=new FormData(e.target);
     try{
-      const res=await fetch("/import.ics",{method:"POST",body:fd});
+      const res=await trackedPwaFetch("/import.ics",{method:"POST",body:fd});
       const data=await res.json();
       if(!res.ok) throw new Error(data.error||"ICS Import fehlgeschlagen");
       await loadPeriods();
@@ -1079,7 +1221,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const fd=new FormData(e.target);
     try{
       toast("Backup wird wiederhergestellt …");
-      const res=await fetch("/import-data.json",{method:"POST",body:fd});
+      const res=await trackedPwaFetch("/import-data.json",{method:"POST",body:fd});
       const data=await res.json();
       if(!res.ok) throw new Error(data.error||"Import fehlgeschlagen");
       await loadPeople(); await loadEntries(); await loadPeriods(); await loadCalendarSubscriptions(); await loadConfig();
@@ -1092,7 +1234,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     e.preventDefault();
     const fd=new FormData(e.target);
     try{
-      const res=await fetch("/import.csv",{method:"POST",body:fd});
+      const res=await trackedPwaFetch("/import.csv",{method:"POST",body:fd});
       const data=await res.json();
       if(!res.ok)throw new Error(data.error||"Import fehlgeschlagen");
       await loadPeople();await loadEntries();toast(`${data.imported} Zeilen importiert`);
@@ -1106,5 +1248,6 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   try{await loadPeriods();}catch(e){toast(e.message);}
   try{await loadCalendarSubscriptions();}catch(e){if(navigator.onLine) toast(e.message);}
   try{await loadConfig();}catch(e){if(navigator.onLine) toast(e.message);}
+  showPage(rememberedPage(),{persist:false,scroll:false});
   applyOnlineState();
 });

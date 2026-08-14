@@ -199,3 +199,14 @@ APP_URL=https://betreuung.DEINE-DOMAIN.TLD
 Cloudflare Access bleibt die Authentifizierungsschicht. Für die bestehende Weboberfläche kann OTP/Allow verwendet werden; zusätzlich kann eine `Service Auth`-Policy das Service Token der externen PWA akzeptieren. Die PWA sendet `CF-Access-Client-ID` und `CF-Access-Client-Secret` bei jedem Serverrequest.
 
 Wichtig: Wenn `AUTH_ENABLED=true` gesetzt ist, verlangt Flask zusätzlich eine eigene Session-Anmeldung. Für den beschriebenen Cloudflare-Aufbau deshalb `AUTH_ENABLED=false` verwenden und den Origin ausschließlich über Cloudflare Tunnel/Access veröffentlichen.
+
+
+## v43 – robuste PWA Offline-/Update-Architektur
+
+- Vollständige Docker-App-Shell wird versioniert lokal gecacht.
+- Die Root-Navigation `/` startet cache-first; Login-, Export- und Kalender-Routen behalten ihre Server-Semantik.
+- Die zuletzt lesbaren GET-API-Antworten bleiben in einem stabilen privaten Daten-Cache über Frontend-Updates hinweg erhalten. Wenn nur dieser Cache verfügbar ist, wird der Datenserver als nicht erreichbar markiert und Schreibvorgänge werden deaktiviert.
+- Service-Worker-Updates werden vollständig im Hintergrund installiert und warten anschließend. Kein automatisches `skipWaiting()`, kein `clients.claim()` und kein automatischer Reload bei `controllerchange`.
+- Im Setup werden App-Version und ein optionaler „Jetzt aktualisieren“-Button angezeigt. Der Button wird bei laufenden Schreib-/Importvorgängen oder offenen Dialogen blockiert.
+- Die aktive Hauptansicht wird in `sessionStorage` gemerkt und nach einem kontrollierten Reload wiederhergestellt.
+- Bestehende SQLite-Daten, Browser-Speicher und Benutzerkonfigurationen werden durch das Update nicht verändert.

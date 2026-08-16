@@ -136,23 +136,71 @@ function monthShort(d){ return d.toLocaleDateString("de-CH",{month:"short"}).rep
 function weekdayShort(d){ return d.toLocaleDateString("de-CH",{weekday:"short"}).replace(".",""); }
 function personById(id){ return people.find(p=>Number(p.id)===Number(id)); }
 function personColor(name){ return (people.find(p=>p.name===name)||{color:"#ececec"}).color; }
+function entryEndDay(e){
+  if(!e) return "";
+  if(e.end_day) return e.end_day;
+  if(Number(e.all_day)===0 && e.start_time && e.end_time && e.end_time < e.start_time) return addDaysIso(e.day,1);
+  return e.day || "";
+}
+function entrySpansDays(e){
+  return Boolean(e && Number(e.all_day)===0 && entryEndDay(e) && entryEndDay(e)>e.day);
+}
 function entryTimeLabel(e){
   if(!e || Number(e.all_day)!==0) return "";
   if(!e.start_time || !e.end_time) return "";
-  const overnight=e.end_time < e.start_time;
-  return `${e.start_time}–${e.end_time}${overnight?" (+1)":""}`;
+  const endDay=entryEndDay(e);
+  if(!endDay || endDay===e.day) return `${e.start_time}–${e.end_time}`;
+  return `${e.start_time} → ${formatDateValue(endDay)} ${e.end_time}`;
 }
 function syncOvernight(prefix){
   const range=qs(`#${prefix}TimeRange`);
   const start=qs(`#${prefix}StartTime`)?.value || "";
   const end=qs(`#${prefix}EndTime`)?.value || "";
+  const startDay=qs(`#${prefix}Date`)?.value || "";
+  const endDate=qs(`#${prefix}EndDate`);
+  if(endDate){
+    if(startDay){
+      endDate.min=startDay;
+      if(!endDate.value || endDate.value<startDay){ endDate.value=startDay; syncDateShell(endDate); }
+    }
+    const spans=Boolean(startDay && endDate.value && endDate.value>startDay);
+    range?.classList.toggle("overnight",false);
+    range?.classList.toggle("spans-days",spans);
+    const hint=qs(`#${prefix}RangeHint`);
+    if(hint){
+      hint.hidden=!spans;
+      hint.textContent=spans?`Mehrtägig: ${formatDateValue(startDay)} bis ${formatDateValue(endDate.value)}`:"";
+    }
+    return;
+  }
   range?.classList.toggle("overnight",Boolean(start && end && end < start));
+}
+function autoAdvanceEndDate(prefix){
+  const startDay=qs(`#${prefix}Date`)?.value || "";
+  const endDate=qs(`#${prefix}EndDate`);
+  const start=qs(`#${prefix}StartTime`)?.value || "";
+  const end=qs(`#${prefix}EndTime`)?.value || "";
+  if(!startDay || !endDate || !start || !end) return;
+  if((!endDate.value || endDate.value===startDay) && end<start){
+    endDate.value=addDaysIso(startDay,1);
+    syncDateShell(endDate);
+  }
+  syncOvernight(prefix);
 }
 function syncTiming(prefix){
   const allDay=qs(`#${prefix}AllDay`);
   const range=qs(`#${prefix}TimeRange`);
   if(!allDay || !range) return;
   range.hidden=allDay.checked;
+  const dateLabel=qs(`#${prefix}DateLabel`);
+  if(dateLabel) dateLabel.textContent=allDay.checked?"Datum":"Von · Datum";
+  const endDate=qs(`#${prefix}EndDate`);
+  if(!allDay.checked && endDate){
+    const startDay=qs(`#${prefix}Date`)?.value || "";
+    if(startDay && (!endDate.value || endDate.value<startDay)){ endDate.value=startDay; syncDateShell(endDate); }
+  }
+  const hint=qs(`#${prefix}RangeHint`);
+  if(hint && allDay.checked) hint.hidden=true;
   syncOvernight(prefix);
 }
 function setTiming(prefix, entry=null){
@@ -163,17 +211,25 @@ function setTiming(prefix, entry=null){
   allDay.checked=entry ? Number(entry.all_day)!==0 : true;
   start.value=entry?.start_time || "";
   end.value=entry?.end_time || "";
+  const endDate=qs(`#${prefix}EndDate`);
+  if(endDate){
+    endDate.value=entry ? entryEndDay(entry) : (qs(`#${prefix}Date`)?.value || "");
+    syncDateShell(endDate);
+  }
   syncTimeShell(start);
   syncTimeShell(end);
   syncTiming(prefix);
 }
 function timingPayload(prefix){
   const allDay=qs(`#${prefix}AllDay`)?.checked ?? true;
-  return {
+  const payload={
     all_day:allDay,
     start_time:allDay ? "" : (qs(`#${prefix}StartTime`)?.value || ""),
     end_time:allDay ? "" : (qs(`#${prefix}EndTime`)?.value || ""),
   };
+  const endDate=qs(`#${prefix}EndDate`);
+  if(!allDay && endDate) payload.end_day=endDate.value || "";
+  return payload;
 }
 
 async function loadPeople(){
@@ -271,8 +327,15 @@ function showPage(name,{persist=true,scroll=true}={}){
 function renderNext(){
   const today=isoToday();
   const end=addDaysIso(today,6);
-  const arr=entries.filter(e=>e.day>=today && e.day<=end).sort((a,b)=>a.day.localeCompare(b.day));
-  qs("#nextList").innerHTML = arr.length ? arr.map(itemHtml).join("") : '<div class="small">Keine kommenden Einträge.</div>';
+  const rows=[];
+  for(const e of entries){
+    if(e.day>=today && e.day<=end) rows.push({day:e.day,kind:1,html:itemHtml(e)});
+    for(const day of entryContinuationDays(e)){
+      if(day>=today && day<=end) rows.push({day,kind:0,html:continuationItemHtml(e,day)});
+    }
+  }
+  rows.sort((a,b)=>a.day.localeCompare(b.day)||a.kind-b.kind);
+  qs("#nextList").innerHTML = rows.length ? rows.map(r=>r.html).join("") : '<div class="small">Keine kommenden Einträge.</div>';
 }
 function itemHtml(e){
   const d=new Date(e.day+"T12:00:00");
@@ -288,16 +351,26 @@ function addDaysIso(day, amount=1){
   d.setDate(d.getDate()+amount);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
-function entryContinuesNextDay(e){
-  return Boolean(e && Number(e.all_day)===0 && e.start_time && e.end_time && e.end_time < e.start_time);
+function entryContinuationDays(e){
+  if(!entrySpansDays(e)) return [];
+  const days=[];
+  const finalDay=entryEndDay(e);
+  let current=addDaysIso(e.day,1);
+  while(current<=finalDay && days.length<3662){
+    days.push(current);
+    current=addDaysIso(current,1);
+  }
+  return days;
 }
 function continuationItemHtml(e, day){
   const d=new Date(day+"T12:00:00");
   const from=formatIsoDate(e.day);
+  const finalDay=entryEndDay(e);
+  const continuationText=day===finalDay?`bis ${e.end_time}`:"ganzer Tag";
   return `<div class="item continuation-item" onclick="openModal(${e.id})">
     <div class="datebox continuation-date"><b>${d.getDate()}</b><span>${monthShort(d)}</span></div>
     <div><div class="who"><span class="dot" style="background:${esc(e.color)}"></span>${esc(e.person)} <span class="continuation-badge">Fortsetzung</span></div>
-    <div class="note">${weekdayShort(d)} · bis ${esc(e.end_time)} · vom ${esc(from)}${e.note?" · "+esc(e.note):""}</div></div>
+    <div class="note">${weekdayShort(d)} · ${esc(continuationText)} · vom ${esc(from)}${e.note?" · "+esc(e.note):""}</div></div>
     <button class="kebab" aria-label="Ursprünglichen Termin öffnen">›</button>
   </div>`;
 }
@@ -417,9 +490,8 @@ function renderList(){
   const rows=[];
   for(const e of source){
     if(e.day.startsWith(year)) rows.push({day:e.day, kind:1, html:itemHtml(e)});
-    if(entryContinuesNextDay(e)){
-      const nextDay=addDaysIso(e.day,1);
-      if(nextDay.startsWith(year)) rows.push({day:nextDay, kind:0, html:continuationItemHtml(e,nextDay)});
+    for(const continuationDay of entryContinuationDays(e)){
+      if(continuationDay.startsWith(year)) rows.push({day:continuationDay, kind:0, html:continuationItemHtml(e,continuationDay)});
     }
   }
   rows.sort((a,b)=>a.day.localeCompare(b.day)||a.kind-b.kind);
@@ -432,7 +504,7 @@ function renderList(){
 function renderStats(){
   const today=isoToday();
   const year=String(new Date().getFullYear());
-  qs("#statUpcoming").textContent=entries.filter(e=>e.day>=today).length;
+  qs("#statUpcoming").textContent=entries.filter(e=>entryEndDay(e)>=today).length;
   qs("#statPeople").textContent=new Set(entries.map(e=>e.person)).size;
   qs("#statYear").textContent=entries.filter(e=>e.day.startsWith(year)).length;
 }
@@ -476,9 +548,9 @@ function renderYear(){
   const byDay=new Map(entries.filter(e=>e.day.startsWith(String(year))).map(e=>[e.day,e]));
   const continuationByDay=new Map();
   for(const e of entries){
-    if(!entryContinuesNextDay(e)) continue;
-    const nextDay=addDaysIso(e.day,1);
-    if(nextDay.startsWith(String(year))) continuationByDay.set(nextDay,e);
+    for(const continuationDay of entryContinuationDays(e)){
+      if(continuationDay.startsWith(String(year))) continuationByDay.set(continuationDay,e);
+    }
   }
   const marks=periodMapForYear(year);
   const tableClass=visibleMonths.length===1?"year month-view":"year";
@@ -495,8 +567,10 @@ function renderYear(){
       const dayMarks=marks.get(iso)||[];
       const weekend=d.getDay()===0||d.getDay()===6;
       const fill=e?`<div class="entry-fill" style="background:${esc(e.color)}"><span>${esc(e.person)}</span></div>`:"";
-      const continuationTitle=continuation?`Fortsetzung ${continuation.person} vom ${formatDateValue(continuation.day)} bis ${continuation.end_time}`:"";
-      const continuationFill=continuation?`<button type="button" class="year-continuation" style="background:${esc(continuation.color)}" title="${esc(continuationTitle)}" aria-label="${esc(continuationTitle)}" onclick="event.stopPropagation();openModal(${continuation.id})"><span>↳ ${esc(continuation.person)} · bis ${esc(continuation.end_time)}</span></button>`:"";
+      const continuationFinal=continuation?entryEndDay(continuation):"";
+      const continuationText=continuation?(iso===continuationFinal?`bis ${continuation.end_time}`:"ganzer Tag"):"";
+      const continuationTitle=continuation?`Fortsetzung ${continuation.person} vom ${formatDateValue(continuation.day)} · ${continuationText}`:"";
+      const continuationFill=continuation?`<button type="button" class="year-continuation" style="background:${esc(continuation.color)}" title="${esc(continuationTitle)}" aria-label="${esc(continuationTitle)}" onclick="event.stopPropagation();openModal(${continuation.id})"><span>↳ ${esc(continuation.person)} · ${esc(continuationText)}</span></button>`:"";
       const markTitle=dayMarks.map(p=>`${periodKindName(p.kind)}: ${p.label}`).join(" · ");
       const rail=dayMarks.length?`<div class="period-rail" title="${esc(markTitle)}">${dayMarks.map(p=>`<span class="period-segment" style="background:${esc(p.color)}"></span>`).join("")}</div>`:"";
       const cellClass=[weekend?"weekend":"",dayMarks.length?"has-period":"",continuation?"has-continuation":""].filter(Boolean).join(" ");
@@ -514,7 +588,7 @@ function renderYear(){
     seen.add(key);
     periodLegend.push(`<span class="period-legend"><i class="bar-swatch" style="background:${esc(p.color)}"></i>${periodKindName(p.kind)}</span>`);
   }
-  qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span><span class="continuation-legend">↳ Fortsetzung vom Vortag</span>`+periodLegend.join("");
+  qs("#legend").innerHTML='<span class="legend-title">Farblegende:</span>'+people.map(p=>`<span><i class="dot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join("")+`<span><i class="dot" style="background:var(--weekend)"></i>Wochenende</span><span class="continuation-legend">↳ mehrtägiger Eintrag</span>`+periodLegend.join("");
   const monthParams=yearMonthQuery();
   const monthQuery=monthParams.toString();
   qs("#csvLink").href=`/export.csv?year=${year}${monthQuery?`&${monthQuery}`:""}`;
@@ -912,7 +986,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "50";
+const PWA_APP_VERSION = "51";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;
@@ -1137,22 +1211,25 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#quickDate").value=isoToday();
   syncDateShell(qs("#quickDate"));
   setCalendarRangeForYear(qs("#filterYear").value);
-  qs("#quickDate").addEventListener("change",()=>updateDateContext("quick"));
-  qs("#modalDate").addEventListener("change",()=>updateDateContext("modal"));
+  qs("#quickDate").addEventListener("change",()=>{updateDateContext("quick");syncOvernight("quick");});
+  qs("#modalDate").addEventListener("change",()=>{updateDateContext("modal");syncOvernight("modal");});
   setTiming("quick");
   ["quick","modal","batch"].forEach(prefix=>{
     qs(`#${prefix}AllDay`)?.addEventListener("change",()=>{
       syncTiming(prefix);
       if(prefix==="batch") resetBatchPreview();
     });
-    qs(`#${prefix}StartTime`)?.addEventListener("change",()=>{syncOvernight(prefix);if(prefix==="batch")resetBatchPreview();});
-    qs(`#${prefix}EndTime`)?.addEventListener("change",()=>{syncOvernight(prefix);if(prefix==="batch")resetBatchPreview();});
+    qs(`#${prefix}StartTime`)?.addEventListener("change",()=>{autoAdvanceEndDate(prefix);syncOvernight(prefix);if(prefix==="batch")resetBatchPreview();});
+    qs(`#${prefix}EndTime`)?.addEventListener("change",()=>{autoAdvanceEndDate(prefix);syncOvernight(prefix);if(prefix==="batch")resetBatchPreview();});
+    qs(`#${prefix}EndDate`)?.addEventListener("change",()=>syncOvernight(prefix));
   });
 
   qs("#quickSave").addEventListener("click",async()=>{
     try{
       if(!qs("#quickDate").value||!selectedQuick)return toast("Datum und Betreuung wählen");
-      await saveEntry(qs("#quickDate").value,selectedQuick,qs("#quickNote").value,timingPayload("quick"));
+      const quickTiming=timingPayload("quick");
+      if(!quickTiming.all_day && !quickTiming.end_day) return toast("Bis-Datum wählen");
+      await saveEntry(qs("#quickDate").value,selectedQuick,qs("#quickNote").value,quickTiming);
       qs("#quickNote").value="";toast("Gespeichert");
     }catch(e){toast(e.message);}
   });
@@ -1181,14 +1258,18 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   qs("#modalSave").addEventListener("click",async()=>{
     try{
       if(!qs("#modalDate").value||!selectedModal)return toast("Datum und Betreuung wählen");
-      await saveEntry(qs("#modalDate").value,selectedModal,qs("#modalNote").value,timingPayload("modal"),editingId);
+      const modalTiming=timingPayload("modal");
+      if(!modalTiming.all_day && !modalTiming.end_day) return toast("Bis-Datum wählen");
+      await saveEntry(qs("#modalDate").value,selectedModal,qs("#modalNote").value,modalTiming,editingId);
       closeModal();toast("Gespeichert");
     }catch(e){toast(e.message);}
   });
   qs("#modalDuplicate").addEventListener("click",()=>{
     if(!editingId) return;
     const e=entries.find(x=>Number(x.id)===Number(editingId)); if(!e) return;
-    editingId=null; qs("#modalTitle").textContent="Termin duplizieren"; qs("#modalDate").value=addDaysIso(e.day,7); syncDateShell(qs("#modalDate"));
+    editingId=null; qs("#modalTitle").textContent="Termin duplizieren";
+    qs("#modalDate").value=addDaysIso(e.day,7); syncDateShell(qs("#modalDate"));
+    if(qs("#modalEndDate")){ qs("#modalEndDate").value=addDaysIso(entryEndDay(e),7); syncDateShell(qs("#modalEndDate")); syncOvernight("modal"); }
     qs("#modalDelete").style.display="none"; qs("#modalShare").style.display="none"; qs("#modalDuplicate").style.display="none";
     toast("Neues Datum wählen und speichern");
   });

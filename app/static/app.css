@@ -615,3 +615,18 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
   .date-picker-btn{right:3px;width:32px;height:32px;min-width:32px;min-height:32px}
 }
 
+
+
+/* v51: echte Start-/Endzeitpunkte mit Bis-Datum für einzelne Einträge. */
+.entry-datetime-range{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:end}
+.entry-datetime-range .entry-start-time-field{grid-column:1 / -1}
+.entry-datetime-range .entry-end-date-field,.entry-datetime-range .entry-end-time-field{min-width:0}
+.entry-datetime-range .entry-end-date-field .date-shell{height:40px;min-height:40px;border-radius:12px}
+.entry-datetime-range .entry-end-date-field .date-display{font-size:15px;text-align:center}
+.entry-range-hint{margin-top:1px;color:var(--accent);font-weight:700}
+.entry-range-hint[hidden]{display:none!important}
+@media(max-width:430px){
+  .entry-datetime-range{gap:8px}
+  .entry-datetime-range .entry-start-time-field{grid-column:1 / -1}
+  .entry-datetime-range .entry-end-date-field .date-display{font-size:14px}
+}

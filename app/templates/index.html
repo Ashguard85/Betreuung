@@ -11,7 +11,7 @@
   <link rel="icon" type="image/png" sizes="64x64" href="/favicon-v17.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v17.png">
   <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-v17.png">
-  <link rel="stylesheet" href="/static/app.css?v=50">
+  <link rel="stylesheet" href="/static/app.css?v=51">
   <title>{{ title }}</title>
 </head>
 <body>
@@ -40,16 +40,18 @@
     <div class="grid two">
       <div class="card">
         <h3>Schnell eintragen</h3>
-        <label class="label">Datum</label>
+        <label id="quickDateLabel" class="label">Datum</label>
         <input id="quickDate" class="input" type="date"/>
         <div id="quickDateContext" class="date-context"></div>
         <div class="space"></div>
         <div class="timing-control">
           <label class="all-day-toggle"><input id="quickAllDay" type="checkbox" checked><span>Ganztägig</span></label>
-          <div id="quickTimeRange" class="time-range" hidden>
-            <label><span>Von</span><input id="quickStartTime" class="input time-input" type="time"></label>
-            <label><span>Bis</span><input id="quickEndTime" class="input time-input" type="time"></label>
+          <div id="quickTimeRange" class="time-range entry-datetime-range" hidden>
+            <label class="entry-start-time-field"><span>Von · Zeit</span><input id="quickStartTime" class="input time-input" type="time"></label>
+            <label class="entry-end-date-field"><span>Bis · Datum</span><input id="quickEndDate" class="input" type="date"></label>
+            <label class="entry-end-time-field"><span>Bis · Zeit</span><input id="quickEndTime" class="input time-input" type="time"></label>
           </div>
+          <div id="quickRangeHint" class="small entry-range-hint" hidden></div>
         </div>
         <div class="space"></div>
         <label class="label">Betreuung</label>
@@ -133,7 +135,7 @@
       <details class="card settings-disclosure">
         <summary>App & Updates</summary>
         <div class="settings-disclosure-body">
-          <div class="row"><span>App-Version</span><span class="spacer"></span><b id="pwaAppVersion">v50</b></div>
+          <div class="row"><span>App-Version</span><span class="spacer"></span><b id="pwaAppVersion">v51</b></div>
           <p id="pwaUpdateStatus" class="small">Updates werden im Hintergrund geprüft.</p>
           <button id="pwaApplyUpdate" class="secondary full topgap" type="button" hidden>Jetzt aktualisieren</button>
           <p class="small">Neue Versionen werden zuerst vollständig lokal geladen. Die laufende Sitzung bleibt unverändert; automatisch gewechselt wird erst nach einem sicheren Neustart oder bewusst über den Button.</p>
@@ -272,16 +274,18 @@
 <div id="modalBack" class="modalback" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="row"><h3 id="modalTitle">Betreuung eintragen</h3><span class="spacer"></span><button class="close" onclick="closeModal()">✕</button></div>
-    <label class="label">Datum</label>
+    <label id="modalDateLabel" class="label">Datum</label>
     <input id="modalDate" class="input" type="date"/>
     <div id="modalDateContext" class="date-context"></div>
     <div class="space"></div>
     <div class="timing-control">
       <label class="all-day-toggle"><input id="modalAllDay" type="checkbox" checked><span>Ganztägig</span></label>
-      <div id="modalTimeRange" class="time-range" hidden>
-        <label><span>Von</span><input id="modalStartTime" class="input time-input" type="time"></label>
-        <label><span>Bis</span><input id="modalEndTime" class="input time-input" type="time"></label>
+      <div id="modalTimeRange" class="time-range entry-datetime-range" hidden>
+        <label class="entry-start-time-field"><span>Von · Zeit</span><input id="modalStartTime" class="input time-input" type="time"></label>
+        <label class="entry-end-date-field"><span>Bis · Datum</span><input id="modalEndDate" class="input" type="date"></label>
+        <label class="entry-end-time-field"><span>Bis · Zeit</span><input id="modalEndTime" class="input time-input" type="time"></label>
       </div>
+      <div id="modalRangeHint" class="small entry-range-hint" hidden></div>
     </div>
     <div class="space"></div>
     <label class="label">Betreuung</label>
@@ -416,6 +420,6 @@
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=50"></script>
+<script src="/static/app.js?v=51"></script>
 </body>
 </html>

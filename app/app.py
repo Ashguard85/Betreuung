@@ -143,7 +143,7 @@ class YearOverviewCell(Flowable):
             continuation_y = self.height - inset_y - continuation_h
             c.setFillColor(continuation_bg)
             c.roundRect(inset_x, continuation_y, max(1, fill_w), max(1, continuation_h), 1.5, stroke=0, fill=1)
-            continuation_label = f"Fort. {self.continuation.get('person') or ''} {self.continuation.get('end_time') or ''}".strip()
+            continuation_label = f"Fort. {self.continuation.get('person') or ''} {self.continuation.get('continuation_text') or ('bis ' + str(self.continuation.get('end_time') or ''))}".strip()
             max_text_w = max(5, fill_w - 2)
             continuation_font = 3.35
             while continuation_font > 2.45 and c.stringWidth(continuation_label, "Helvetica-Bold", continuation_font) > max_text_w:
@@ -236,6 +236,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS entries (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           day TEXT NOT NULL UNIQUE,
+          end_day TEXT NOT NULL DEFAULT '',
           person_id INTEGER NOT NULL,
           note TEXT NOT NULL DEFAULT '',
           all_day INTEGER NOT NULL DEFAULT 1,
@@ -298,6 +299,20 @@ def init_db():
             conn.execute("ALTER TABLE entries ADD COLUMN start_time TEXT NOT NULL DEFAULT ''")
         if "end_time" not in entry_columns:
             conn.execute("ALTER TABLE entries ADD COLUMN end_time TEXT NOT NULL DEFAULT ''")
+        if "end_day" not in entry_columns:
+            conn.execute("ALTER TABLE entries ADD COLUMN end_day TEXT NOT NULL DEFAULT ''")
+        # Preserve every existing record. Old timed entries with an end time earlier
+        # than the start time represented an overnight appointment ending next day.
+        conn.execute("""
+            UPDATE entries
+               SET end_day = CASE
+                   WHEN all_day=0 AND start_time<>'' AND end_time<>'' AND end_time < start_time
+                     THEN date(day, '+1 day')
+                   ELSE day
+               END
+             WHERE end_day='' OR end_day IS NULL
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_end_day ON entries(end_day)")
         people_columns = {r["name"] for r in conn.execute("PRAGMA table_info(people)").fetchall()}
         if "ical_title" not in people_columns:
             conn.execute("ALTER TABLE people ADD COLUMN ical_title TEXT NOT NULL DEFAULT ''")
@@ -478,7 +493,7 @@ def valid_hhmm(value):
         return None
 
 
-def normalize_entry_timing(payload):
+def normalize_entry_timing(payload, allow_equal=False):
     raw_all_day = payload.get("all_day", True)
     if isinstance(raw_all_day, str):
         all_day = raw_all_day.strip().lower() not in {"0", "false", "no", "off"}
@@ -491,17 +506,54 @@ def normalize_entry_timing(payload):
     end_time = valid_hhmm(payload.get("end_time"))
     if not start_time or not end_time:
         return None, None, None, "Von und Bis sind bei einem Termin mit Uhrzeit erforderlich"
-    if end_time == start_time:
+    if end_time == start_time and not allow_equal:
         return None, None, None, "Von und Bis dürfen nicht gleich sein"
-    # If the end time is earlier than the start time, the appointment ends
-    # on the following day (e.g. 22:00–05:00). This keeps the data model
-    # simple while still supporting overnight care.
     return 0, start_time, end_time, None
+
+
+def resolve_entry_end_day(day, all_day, start_time, end_time, raw_end_day=None):
+    """Resolve the inclusive calendar date on which a timed entry ends.
+
+    Missing end_day keeps backwards compatibility: an end time earlier than the
+    start time means the following day. New clients send end_day explicitly and
+    can therefore create arbitrary multi-day intervals.
+    """
+    if all_day:
+        return day, None
+
+    raw = str(raw_end_day or "").strip()
+    if raw:
+        end_day = valid_iso_day(raw)
+        if not end_day:
+            return None, "Bis-Datum ist ungültig"
+    else:
+        end_obj = date.fromisoformat(day)
+        if end_time < start_time:
+            end_obj += timedelta(days=1)
+        end_day = end_obj.isoformat()
+
+    if end_day < day:
+        return None, "Bis-Datum darf nicht vor dem Von-Datum liegen"
+    if end_day == day and end_time <= start_time:
+        return None, "Bis muss nach Von liegen"
+    if (date.fromisoformat(end_day) - date.fromisoformat(day)).days > 3660:
+        return None, "Ein Betreuungseintrag darf maximal zehn Jahre umfassen"
+    return end_day, None
+
+
+def entry_effective_end_day(row):
+    day = str(row.get("day") or "")
+    explicit = valid_iso_day(str(row.get("end_day") or ""))
+    if explicit:
+        return explicit
+    if not row.get("all_day") and row.get("start_time") and row.get("end_time") and row["end_time"] < row["start_time"]:
+        return (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    return day
 
 
 def entry_rows(where="", params=()):
     query = """
-      SELECT e.id, e.day, e.note, e.all_day, e.start_time, e.end_time,
+      SELECT e.id, e.day, e.end_day, e.note, e.all_day, e.start_time, e.end_time,
              e.created_at, e.updated_at,
              p.id AS person_id, p.name AS person, p.color AS color,
              p.ical_title AS ical_title
@@ -573,7 +625,7 @@ def history_add(action, snapshot, entry_id=None):
 
 def entry_snapshot(entry_id):
     with db() as conn:
-        r=conn.execute("SELECT e.id,e.day,e.person_id,e.note,e.all_day,e.start_time,e.end_time,p.name AS person FROM entries e JOIN people p ON p.id=e.person_id WHERE e.id=?",(entry_id,)).fetchone()
+        r=conn.execute("SELECT e.id,e.day,e.end_day,e.person_id,e.note,e.all_day,e.start_time,e.end_time,p.name AS person FROM entries e JOIN people p ON p.id=e.person_id WHERE e.id=?",(entry_id,)).fetchone()
     return dict(r) if r else None
 
 
@@ -617,8 +669,14 @@ def api_history_restore(history_id):
         if not person:
             return jsonify({"error":"Die Betreuungsperson existiert nicht mehr"}),409
         now=datetime.now().isoformat(timespec="seconds")
-        cur=conn.execute("""INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)""",
-            (day,person["id"],str(snap.get("note", "")),1 if snap.get("all_day",1) else 0,str(snap.get("start_time", "")),str(snap.get("end_time", "")),now,now))
+        snap_all_day=1 if snap.get("all_day",1) else 0
+        snap_start=str(snap.get("start_time", ""))
+        snap_end=str(snap.get("end_time", ""))
+        restored_end_day, end_error = resolve_entry_end_day(day, snap_all_day, snap_start, snap_end, snap.get("end_day"))
+        if end_error:
+            return jsonify({"error":f"Gespeicherter Eintrag ist ungültig: {end_error}"}),400
+        cur=conn.execute("""INSERT INTO entries(day,end_day,person_id,note,all_day,start_time,end_time,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (day,restored_end_day,person["id"],str(snap.get("note", "")),snap_all_day,snap_start,snap_end,now,now))
         restored_id=cur.lastrowid
     history_add("restored", entry_snapshot(restored_id), restored_id)
     backup_db("history-restore")
@@ -788,11 +846,14 @@ def api_entries_add():
     day = valid_iso_day(str(payload.get("day", "")))
     person_id = payload.get("person_id")
     note = str(payload.get("note", "")).strip()
-    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload)
+    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload, allow_equal=True)
     if not day or not person_id:
         return jsonify({"error": "Datum und Betreuung sind erforderlich"}), 400
     if timing_error:
         return jsonify({"error": timing_error}), 400
+    end_day, end_day_error = resolve_entry_end_day(day, all_day, start_time, end_time, payload.get("end_day"))
+    if end_day_error:
+        return jsonify({"error": end_day_error}), 400
 
     now = datetime.now().isoformat(timespec="seconds")
     try:
@@ -800,22 +861,22 @@ def api_entries_add():
             existing = conn.execute("SELECT id FROM entries WHERE day=?", (day,)).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE entries SET person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=? WHERE id=?",
-                    (person_id, note, all_day, start_time, end_time, now, existing["id"]),
+                    "UPDATE entries SET end_day=?,person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=? WHERE id=?",
+                    (end_day, person_id, note, all_day, start_time, end_time, now, existing["id"]),
                 )
                 entry_id = existing["id"]
                 status = 200
             else:
                 cur = conn.execute(
-                    """INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
-                       VALUES(?,?,?,?,?,?,?,?)""",
-                    (day, person_id, note, all_day, start_time, end_time, now, now),
+                    """INSERT INTO entries(day,end_day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (day, end_day, person_id, note, all_day, start_time, end_time, now, now),
                 )
                 entry_id = cur.lastrowid
                 status = 201
         history_add("updated" if status==200 else "created", entry_snapshot(entry_id), entry_id)
         backup_db("entry")
-        return jsonify({"id": entry_id, "day": day}), status
+        return jsonify({"id": entry_id, "day": day, "end_day": end_day}), status
     except sqlite3.IntegrityError as exc:
         return jsonify({"error": str(exc)}), 409
 
@@ -827,23 +888,26 @@ def api_entries_update(entry_id):
     day = valid_iso_day(str(payload.get("day", "")))
     person_id = payload.get("person_id")
     note = str(payload.get("note", "")).strip()
-    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload)
+    all_day, start_time, end_time, timing_error = normalize_entry_timing(payload, allow_equal=True)
     if not day or not person_id:
         return jsonify({"error": "Datum und Betreuung sind erforderlich"}), 400
     if timing_error:
         return jsonify({"error": timing_error}), 400
+    end_day, end_day_error = resolve_entry_end_day(day, all_day, start_time, end_time, payload.get("end_day"))
+    if end_day_error:
+        return jsonify({"error": end_day_error}), 400
 
     try:
         with db() as conn:
             conn.execute(
                 """UPDATE entries
-                   SET day=?,person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=?
+                   SET day=?,end_day=?,person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=?
                    WHERE id=?""",
-                (day, person_id, note, all_day, start_time, end_time, datetime.now().isoformat(timespec="seconds"), entry_id),
+                (day, end_day, person_id, note, all_day, start_time, end_time, datetime.now().isoformat(timespec="seconds"), entry_id),
             )
         history_add("updated", entry_snapshot(entry_id), entry_id)
         backup_db("entry-update")
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "end_day": end_day})
     except sqlite3.IntegrityError:
         return jsonify({"error": "Für dieses Datum gibt es bereits einen Eintrag"}), 409
 
@@ -965,10 +1029,11 @@ def api_entries_batch_create():
     created = 0
     with db() as conn:
         for day in preview["create_days"]:
+            entry_end_day, _ = resolve_entry_end_day(day, batch["all_day"], batch["start_time"], batch["end_time"], None)
             cur = conn.execute(
-                """INSERT OR IGNORE INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (day, batch["person_id"], batch["note"], batch["all_day"], batch["start_time"], batch["end_time"], now, now),
+                """INSERT OR IGNORE INTO entries(day,end_day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (day, entry_end_day, batch["person_id"], batch["note"], batch["all_day"], batch["start_time"], batch["end_time"], now, now),
             )
             if cur.rowcount == 1:
                 created += 1
@@ -1477,9 +1542,9 @@ def export_csv():
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Datum", "Betreuung", "Ganztägig", "Von", "Bis", "Bemerkung"])
+    w.writerow(["Datum", "Bis-Datum", "Betreuung", "Ganztägig", "Von", "Bis", "Bemerkung"])
     for r in rows:
-        w.writerow([r["day"], r["person"], "Ja" if r["all_day"] else "Nein", r["start_time"], r["end_time"], r["note"]])
+        w.writerow([r["day"], entry_effective_end_day(r), r["person"], "Ja" if r["all_day"] else "Nein", r["start_time"], r["end_time"], r["note"]])
 
     body = "\ufeff" + buf.getvalue()
     return Response(
@@ -1576,7 +1641,8 @@ def export_pdf():
             Paragraph(xml_escape(r["person"]), cell_style),
             Paragraph(
                 "Ganztägig" if r["all_day"] else
-                f"{r['start_time']}–{r['end_time']}{' (+1)' if r['end_time'] < r['start_time'] else ''}",
+                (f"{r['start_time']}–{r['end_time']}" if entry_effective_end_day(r) == r["day"]
+                 else f"{r['start_time']} → {date.fromisoformat(entry_effective_end_day(r)).strftime('%d.%m.%Y')} {r['end_time']}"),
                 cell_style
             ),
             Paragraph(xml_escape(r["note"] or ""), cell_style),
@@ -1648,9 +1714,9 @@ def export_year_pdf():
     month_indices = selected_months if selected_months else list(range(1, 13))
     single_month = len(month_indices) == 1
 
-    range_start = (date(year, 1, 1) - timedelta(days=1)).isoformat()
+    range_start = date(year, 1, 1).isoformat()
     range_end = date(year, 12, 31).isoformat()
-    source_entries = entry_rows("e.day >= ? AND e.day <= ?", (range_start, range_end))
+    source_entries = entry_rows("e.day <= ? AND COALESCE(NULLIF(e.end_day,''), e.day) >= ?", (range_end, range_start))
     year_entries = [row for row in source_entries if row["day"].startswith(f"{year}-")]
     if selected_months:
         prefixes = tuple(f"{year}-{m:02d}-" for m in month_indices)
@@ -1659,17 +1725,20 @@ def export_year_pdf():
         display_entries = year_entries
     by_day = {row["day"]: row for row in display_entries}
     continuation_by_day = {}
+    selected_month_set = set(month_indices)
     for row in source_entries:
         if row.get("all_day") or not row.get("start_time") or not row.get("end_time"):
             continue
-        if row["end_time"] >= row["start_time"]:
-            continue
-        next_day = date.fromisoformat(row["day"]) + timedelta(days=1)
-        if next_day.year == year and next_day.month in set(month_indices):
-            continuation_by_day[next_day.isoformat()] = row
+        final_day = date.fromisoformat(entry_effective_end_day(row))
+        current = date.fromisoformat(row["day"]) + timedelta(days=1)
+        while current <= final_day:
+            if current.year == year and current.month in selected_month_set:
+                continuation = dict(row)
+                continuation["continuation_text"] = f"bis {row['end_time']}" if current == final_day else "ganzer Tag"
+                continuation_by_day[current.isoformat()] = continuation
+            current += timedelta(days=1)
 
     year_periods = period_rows(str(year))
-    selected_month_set = set(month_indices)
 
     display_periods = []
     periods_by_day = {}
@@ -1799,7 +1868,7 @@ def export_year_pdf():
     legend_items.extend(used_people)
     legend_items.append(("Wochenende", "#fff2b9"))
     if continuation_by_day:
-        legend_items.append(("Fort. = Fortsetzung vom Vortag", "#e4efeb"))
+        legend_items.append(("Fort. = mehrtägiger Eintrag", "#e4efeb"))
 
     kind_names = {"vacation": "Ferien", "holiday": "Feiertage", "other": "Markierung"}
     seen_period_legend = set()
@@ -1881,15 +1950,19 @@ def import_csv():
             raw_all_day = (row.get("Ganztägig") or row.get("all_day") or "").strip().lower()
             start_time = valid_hhmm(row.get("Von") or row.get("start_time")) or ""
             end_time = valid_hhmm(row.get("Bis") or row.get("end_time")) or ""
+            csv_end_day_raw = (row.get("Bis-Datum") or row.get("end_day") or "").strip()
             if raw_all_day:
                 all_day = 0 if raw_all_day in {"nein", "no", "0", "false", "off"} else 1
             else:
                 all_day = 0 if start_time and end_time else 1
-            if not all_day and (not start_time or not end_time or end_time == start_time):
+            if not all_day and (not start_time or not end_time):
                 continue
             if all_day:
                 start_time = end_time = ""
             if not day or not person_name:
+                continue
+            csv_end_day, end_error = resolve_entry_end_day(day, all_day, start_time, end_time, csv_end_day_raw)
+            if end_error:
                 continue
             person_id = people.get(person_name)
             if not person_id:
@@ -1900,16 +1973,17 @@ def import_csv():
                 person_id = cur.lastrowid
                 people[person_name] = person_id
             conn.execute(
-                """INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?)
+                """INSERT INTO entries(day,end_day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(day) DO UPDATE SET
+                     end_day=excluded.end_day,
                      person_id=excluded.person_id,
                      note=excluded.note,
                      all_day=excluded.all_day,
                      start_time=excluded.start_time,
                      end_time=excluded.end_time,
                      updated_at=excluded.updated_at""",
-                (day, person_id, note, all_day, start_time, end_time, now, now),
+                (day, csv_end_day, person_id, note, all_day, start_time, end_time, now, now),
             )
             imported += 1
     backup_db("import")
@@ -1935,7 +2009,7 @@ def export_data_json():
             "SELECT name,color,sort_order,ical_title,calendar_token FROM people ORDER BY sort_order,name"
         ).fetchall()]
         entries = [dict(r) for r in conn.execute(
-            """SELECT e.day,p.name AS person,e.note,e.all_day,e.start_time,e.end_time,e.created_at,e.updated_at
+            """SELECT e.day,e.end_day,p.name AS person,e.note,e.all_day,e.start_time,e.end_time,e.created_at,e.updated_at
                FROM entries e JOIN people p ON p.id=e.person_id
                ORDER BY e.day"""
         ).fetchall()]
@@ -1950,7 +2024,7 @@ def export_data_json():
 
     payload = {
         "format": "betreuungsplan-backup",
-        "version": 2,
+        "version": 3,
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "app_title": APP_TITLE,
         "people": people,
@@ -1985,7 +2059,7 @@ def import_data_json():
 
     if not isinstance(payload, dict) or payload.get("format") != "betreuungsplan-backup":
         return jsonify({"error": "Diese Datei ist kein Betreuungsplan-Backup"}), 400
-    if payload.get("version") not in {1, 2}:
+    if payload.get("version") not in {1, 2, 3}:
         return jsonify({"error": f"Nicht unterstützte Backup-Version: {payload.get('version')}"}), 400
 
     people = payload.get("people")
@@ -2028,11 +2102,14 @@ def import_data_json():
             "start_time": item.get("start_time", ""),
             "end_time": item.get("end_time", ""),
         }
-        all_day, start_time, end_time, timing_error = normalize_entry_timing(timing_payload)
+        all_day, start_time, end_time, timing_error = normalize_entry_timing(timing_payload, allow_equal=True)
         if timing_error:
             return jsonify({"error": f"Ungültige Zeit an Betreuungseintrag {idx + 1}: {timing_error}"}), 400
+        restored_end_day, end_error = resolve_entry_end_day(day, all_day, start_time, end_time, item.get("end_day"))
+        if end_error:
+            return jsonify({"error": f"Ungültiges Bis-Datum an Betreuungseintrag {idx + 1}: {end_error}"}), 400
         normalized_entries.append((
-            day, person, str(item.get("note", "")), all_day, start_time, end_time,
+            day, restored_end_day, person, str(item.get("note", "")), all_day, start_time, end_time,
             str(item.get("created_at") or now), str(item.get("updated_at") or now),
         ))
 
@@ -2095,10 +2172,10 @@ def import_data_json():
             )
             person_ids = {r["name"]: r["id"] for r in conn.execute("SELECT id,name FROM people").fetchall()}
             conn.executemany(
-                """INSERT INTO entries(day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                [(day, person_ids[person], note, all_day, start_time, end_time, created_at, updated_at)
-                 for day, person, note, all_day, start_time, end_time, created_at, updated_at in normalized_entries],
+                """INSERT INTO entries(day,end_day,person_id,note,all_day,start_time,end_time,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                [(day, end_day, person_ids[person], note, all_day, start_time, end_time, created_at, updated_at)
+                 for day, end_day, person, note, all_day, start_time, end_time, created_at, updated_at in normalized_entries],
             )
             conn.executemany(
                 """INSERT INTO periods(start_day,end_day,kind,label,color,source,external_uid,created_at,updated_at)
@@ -2149,9 +2226,7 @@ def entry_ics_event_lines(r, host):
     else:
         start_compact = str(r.get("start_time") or "").replace(":", "")
         end_compact = str(r.get("end_time") or "").replace(":", "")
-        end_day = date.fromisoformat(r["day"])
-        if str(r.get("end_time") or "") < str(r.get("start_time") or ""):
-            end_day += timedelta(days=1)
+        end_day = date.fromisoformat(entry_effective_end_day(r))
         end_day_compact = end_day.strftime("%Y%m%d")
         lines.extend([
             f"DTSTART:{day_compact}T{start_compact}00",
@@ -2186,10 +2261,8 @@ def build_ics_calendar(rows, host, calendar_name):
 def rows_for_calendar_range(start_day, end_day, people=None, search=""):
     """Return entries whose actual event interval overlaps the inclusive date range."""
     people = [p for p in (people or []) if p]
-    # Fetch one day before the range so an overnight entry can continue into start_day.
-    fetch_start = (date.fromisoformat(start_day) - timedelta(days=1)).isoformat()
-    clauses = ["e.day >= ?", "e.day <= ?"]
-    params = [fetch_start, end_day]
+    clauses = ["e.day <= ?", "COALESCE(NULLIF(e.end_day,''), e.day) >= ?"]
+    params = [end_day, start_day]
     if people:
         placeholders = ",".join("?" for _ in people)
         clauses.append(f"p.name IN ({placeholders})")
@@ -2201,15 +2274,7 @@ def rows_for_calendar_range(start_day, end_day, people=None, search=""):
     rows = entry_rows(" AND ".join(clauses), tuple(params))
     wanted_start = date.fromisoformat(start_day)
     wanted_end = date.fromisoformat(end_day)
-    result = []
-    for row in rows:
-        event_start = date.fromisoformat(row["day"])
-        event_end = event_start
-        if not row.get("all_day") and row.get("start_time") and row.get("end_time") and row["end_time"] < row["start_time"]:
-            event_end += timedelta(days=1)
-        if event_end >= wanted_start and event_start <= wanted_end:
-            result.append(row)
-    return result
+    return [row for row in rows if date.fromisoformat(entry_effective_end_day(row)) >= wanted_start and date.fromisoformat(row["day"]) <= wanted_end]
 
 
 @app.get("/export.ics")

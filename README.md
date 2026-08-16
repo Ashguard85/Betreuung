@@ -1,3 +1,9 @@
+# v52 – kompakte Fortsetzungen im Jahresplan
+
+- Volle Zwischentage mehrtägiger Einträge zeigen im Jahresplan nur noch den Namen.
+- Der letzte Tag zeigt bei einer Endzeit weiterhin `Name · bis HH:MM`.
+- Der Jahres-PDF-Export verwendet dieselbe kompakte Darstellung.
+
 # v51 – Mehrtägige Betreuung mit Von-/Bis-Datum
 
 - Einzelne Betreuungseinträge können jetzt einen echten Start- und Endzeitpunkt über mehrere Kalendertage haben.

@@ -143,7 +143,10 @@ class YearOverviewCell(Flowable):
             continuation_y = self.height - inset_y - continuation_h
             c.setFillColor(continuation_bg)
             c.roundRect(inset_x, continuation_y, max(1, fill_w), max(1, continuation_h), 1.5, stroke=0, fill=1)
-            continuation_label = f"Fort. {self.continuation.get('person') or ''} {self.continuation.get('continuation_text') or ('bis ' + str(self.continuation.get('end_time') or ''))}".strip()
+            continuation_text = str(self.continuation.get("continuation_text") or "").strip()
+            continuation_label = str(self.continuation.get("person") or "")
+            if continuation_text.startswith("bis "):
+                continuation_label = f"{continuation_label} · {continuation_text}"
             max_text_w = max(5, fill_w - 2)
             continuation_font = 3.35
             while continuation_font > 2.45 and c.stringWidth(continuation_label, "Helvetica-Bold", continuation_font) > max_text_w:

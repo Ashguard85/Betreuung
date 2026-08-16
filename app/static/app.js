@@ -989,7 +989,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "54";
+const PWA_APP_VERSION = "55";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;
@@ -1056,12 +1056,67 @@ async function announceWaitingWorker(worker){
   setPwaUpdateStatus(`Neue Version verfügbar: ${label}. Sie ist bereits lokal geladen.`,true);
 }
 
-async function checkPwaUpdate(force=false){
-  if(!pwaRegistration || !navigator.onLine) return;
+
+function waitForWorkerInstall(worker,timeoutMs=12000){
+  return new Promise(resolve=>{
+    if(!worker) return resolve(null);
+    if(["installed","activated","redundant"].includes(worker.state)) return resolve(worker);
+    let done=false;
+    let timer=null;
+    const finish=()=>{
+      if(done)return;
+      done=true;
+      if(timer)clearTimeout(timer);
+      try{worker.removeEventListener("statechange",onState);}catch(_e){}
+      resolve(worker);
+    };
+    const onState=()=>{
+      if(["installed","activated","redundant"].includes(worker.state)) finish();
+    };
+    worker.addEventListener("statechange",onState);
+    timer=setTimeout(finish,timeoutMs);
+  });
+}
+
+async function inspectPwaRegistration(reg,{waitForInstall=false}={}){
+  if(!reg) return "";
+  if(reg.waiting){
+    await announceWaitingWorker(reg.waiting);
+    return "waiting";
+  }
+  if(reg.installing){
+    setPwaUpdateStatus("Neue PWA-Version wird im Hintergrund geladen …",false);
+    const worker=reg.installing;
+    if(waitForInstall) await waitForWorkerInstall(worker);
+    if(reg.waiting){
+      await announceWaitingWorker(reg.waiting);
+      return "waiting";
+    }
+    if(worker.state==="installed" && navigator.serviceWorker.controller){
+      await announceWaitingWorker(worker);
+      return "waiting";
+    }
+    if(worker.state==="redundant"){
+      setPwaUpdateStatus("Update konnte nicht vollständig installiert werden. Bitte erneut prüfen.",false);
+      return "failed";
+    }
+    return "installing";
+  }
+  return "";
+}
+
+
+async function checkPwaUpdate(force=false,{waitForInstall=false}={}){
+  if(!pwaRegistration || !navigator.onLine) return "";
   const now=Date.now();
-  if(!force && now-pwaLastUpdateCheck<15*60*1000) return;
+  if(!force && now-pwaLastUpdateCheck<15*60*1000) return "";
   pwaLastUpdateCheck=now;
-  try{await pwaRegistration.update();}catch(_error){}
+  try{
+    await pwaRegistration.update();
+    return await inspectPwaRegistration(pwaRegistration,{waitForInstall});
+  }catch(_error){
+    return "error";
+  }
 }
 
 function reloadOnceForPwaUpdate(){
@@ -1171,22 +1226,28 @@ async function registerPwa(){
   try{
     const reg=await navigator.serviceWorker.register("/service-worker.js",{scope:"/",updateViaCache:"none"});
     pwaRegistration=reg;
-    // A fully downloaded update left waiting from the previous session is safe to
-    // activate now: startup has not loaded data or accepted user input yet.
+
     if(reg.waiting && navigator.serviceWorker.controller){
       activateWaitingWorker(reg.waiting,{startup:true});
       return "activating";
     }
-    if(reg.waiting) announceWaitingWorker(reg.waiting);
+    await inspectPwaRegistration(reg,{waitForInstall:false});
+
     reg.addEventListener("updatefound",()=>{
       const worker=reg.installing;
       if(!worker)return;
-      worker.addEventListener("statechange",()=>{
-        if(worker.state==="installed" && navigator.serviceWorker.controller) announceWaitingWorker(worker);
+      setPwaUpdateStatus("Neue PWA-Version wird im Hintergrund geladen …",false);
+      worker.addEventListener("statechange",async()=>{
+        if(worker.state==="installed" && navigator.serviceWorker.controller) await announceWaitingWorker(worker);
         if(worker.state==="installed" && !navigator.serviceWorker.controller) setPwaUpdateStatus("Offline-Basis installiert. Ab dem nächsten Start läuft die App aus dem lokalen App-Cache.",false);
+        if(worker.state==="redundant") setPwaUpdateStatus("Update konnte nicht vollständig installiert werden. Bitte erneut prüfen.",false);
       });
     });
-    setTimeout(()=>checkPwaUpdate(true),1200);
+
+    setTimeout(async()=>{
+      await checkPwaUpdate(true,{waitForInstall:false});
+      await inspectPwaRegistration(reg,{waitForInstall:false});
+    },1200);
   }catch(e){console.warn("PWA Service Worker konnte nicht registriert werden",e);setPwaUpdateStatus("PWA-Updateprüfung momentan nicht verfügbar.",false);}
 }
 

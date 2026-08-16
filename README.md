@@ -1,3 +1,10 @@
+# v55 – zuverlässige PWA-Update-Erkennung
+
+- Behebt die Race Condition beim Erkennen eines bereits laufenden `installing` Workers.
+- Der manuelle Update-Check wartet jetzt bis zu 12 Sekunden auf `installed/waiting` statt pauschal nur 900 ms.
+- `register()` prüft unmittelbar `waiting` und `installing`, auch wenn `updatefound` schon vor dem Listener ausgelöst wurde.
+- Updates werden weiterhin nicht aggressiv mitten in einer Benutzersitzung aktiviert.
+
 # v54 – Jahreskalender Runtime-Fix
 
 - Behebt `entry is not defined` aus v53 im Jahreskalender.

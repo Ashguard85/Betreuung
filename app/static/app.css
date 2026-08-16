@@ -554,3 +554,64 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
   .list-actions .secondary,.list-actions .linkbtn{width:100%;min-width:0;justify-content:center;text-align:center}
   .list-actions #listExportHint{grid-column:1/-1}
 }
+
+
+/* v50: visible calendar affordance for every date field.
+   The native date input remains the full-field tap target; the button is only an
+   additional explicit opener for "Von/Bis" and the other date fields. */
+.date-shell.has-picker-button .date-display{
+  padding-left:10px;
+  padding-right:42px;
+}
+.date-picker-btn{
+  position:absolute;
+  z-index:4;
+  right:4px;
+  top:50%;
+  transform:translateY(-50%);
+  width:34px;
+  height:34px;
+  min-width:34px;
+  min-height:34px;
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:9px;
+  background:rgba(255,255,255,.94);
+  color:var(--muted);
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.date-picker-btn:active{background:#eef3f1}
+.date-picker-btn::before{
+  content:"";
+  width:15px;
+  height:14px;
+  border:1.5px solid currentColor;
+  border-radius:3px;
+  box-sizing:border-box;
+  background:
+    linear-gradient(currentColor,currentColor) 2px 4px/9px 1.5px no-repeat;
+}
+.date-picker-btn::after{
+  content:"";
+  position:absolute;
+  width:9px;
+  height:3px;
+  top:9px;
+  border-left:1.5px solid currentColor;
+  border-right:1.5px solid currentColor;
+  box-sizing:border-box;
+}
+.date-native:disabled ~ .date-picker-btn{
+  opacity:.4;
+  pointer-events:none;
+}
+@media(max-width:430px){
+  .date-shell.has-picker-button .date-display{padding-right:39px}
+  .date-picker-btn{right:3px;width:32px;height:32px;min-width:32px;min-height:32px}
+}
+

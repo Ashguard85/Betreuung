@@ -55,9 +55,40 @@ function syncDateShell(input){
   if(display) display.textContent=formatDateValue(input.value);
 }
 function syncAllDateShells(){ qsa('.date-shell input[type="date"]').forEach(syncDateShell); }
+function openNativeDatePicker(input){
+  if(!input || input.disabled) return;
+  try{
+    if(typeof input.showPicker==="function"){
+      input.showPicker();
+      return;
+    }
+  }catch(_e){}
+  try{ input.focus({preventScroll:true}); }catch(_e){ try{ input.focus(); }catch(__e){} }
+  try{ input.click(); }catch(_e){}
+}
+function ensureDatePickerButton(input){
+  const shell=input?.closest?.(".date-shell");
+  if(!shell || shell.querySelector(".date-picker-btn")) return;
+  shell.classList.add("has-picker-button");
+  const button=document.createElement("button");
+  button.type="button";
+  button.className="date-picker-btn";
+  button.setAttribute("aria-label","Datum auswählen");
+  button.setAttribute("title","Datum auswählen");
+  button.addEventListener("click",event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    openNativeDatePicker(input);
+  });
+  shell.appendChild(button);
+}
 function upgradeDateInputs(){
   qsa('input[type="date"].input').forEach(input=>{
-    if(input.closest(".date-shell")){ syncDateShell(input); return; }
+    if(input.closest(".date-shell")){
+      syncDateShell(input);
+      ensureDatePickerButton(input);
+      return;
+    }
     const shell=document.createElement("div");
     shell.className="date-shell";
     input.parentNode.insertBefore(shell,input);
@@ -68,6 +99,7 @@ function upgradeDateInputs(){
     shell.appendChild(display);
     input.addEventListener("input",()=>syncDateShell(input));
     input.addEventListener("change",()=>syncDateShell(input));
+    ensureDatePickerButton(input);
     syncDateShell(input);
   });
 }
@@ -880,7 +912,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "46";
+const PWA_APP_VERSION = "50";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;

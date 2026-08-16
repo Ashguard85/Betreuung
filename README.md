@@ -1,3 +1,11 @@
+# v50 – Datumspicker für Von/Bis
+
+- Alle Datumsfelder besitzen jetzt einen sichtbaren Kalender-Button.
+- Besonders die Von-/Bis-Felder lassen sich damit eindeutig per nativer Datumsauswahl öffnen.
+- Der bisherige native Date-Input über das gesamte Feld bleibt erhalten.
+- `showPicker()` wird genutzt, wenn der Browser es unterstützt; iOS/ältere Browser erhalten einen Focus/Click-Fallback.
+- Keine Änderung an IndexedDB, localStorage, Serverdaten oder fachlicher Terminlogik.
+
 # v46 – Service-Worker Cache-Recovery
 
 Die Fullstack-PWA verwendet dieselbe sichere Update-Logik wie das Pages-Frontend: einmalige Recovery von v43-v45, danach sichere Aktivierung vollständig geladener Updates beim nächsten App-Start. Keine `clients.claim()`-Übernahme und keine unkontrollierten Reloads.

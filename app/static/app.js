@@ -572,7 +572,8 @@ function renderYear(){
       const continuationText=continuationIsFinal?`bis ${continuation.end_time}`:"";
       const continuationTitle=continuation?`Fortsetzung ${continuation.person} vom ${formatDateValue(continuation.day)}${continuationText?` · ${continuationText}`:""}`:"";
       const continuationDisplay=continuation?`${esc(continuation.person)}${continuationText?` · ${esc(continuationText)}`:""}`:"";
-      const continuationFill=continuation?`<button type="button" class="year-continuation" style="background:${esc(continuation.color)}" title="${esc(continuationTitle)}" aria-label="${esc(continuationTitle)}" onclick="event.stopPropagation();openModal(${continuation.id})"><span>${continuationDisplay}</span></button>`:"";
+      const continuationOnly=Boolean(continuation && !entry);
+      const continuationFill=continuation?`<button type="button" class="year-continuation${continuationOnly?" year-continuation-full":""}" style="background:${esc(continuation.color)}" title="${esc(continuationTitle)}" aria-label="${esc(continuationTitle)}" onclick="event.stopPropagation();openModal(${continuation.id})"><span>${continuationDisplay}</span></button>`:"";
       const markTitle=dayMarks.map(p=>`${periodKindName(p.kind)}: ${p.label}`).join(" · ");
       const rail=dayMarks.length?`<div class="period-rail" title="${esc(markTitle)}">${dayMarks.map(p=>`<span class="period-segment" style="background:${esc(p.color)}"></span>`).join("")}</div>`:"";
       const cellClass=[weekend?"weekend":"",dayMarks.length?"has-period":"",continuation?"has-continuation":""].filter(Boolean).join(" ");
@@ -988,7 +989,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "52";
+const PWA_APP_VERSION = "53";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;

@@ -1,4 +1,4 @@
-const APP_VERSION = "52";
+const APP_VERSION = "53";
 const VERSION = `betreuung-pwa-v${APP_VERSION}`;
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = "betreuung-private-data-v1";
@@ -7,8 +7,8 @@ const INDEX_URL = "/";
 
 const ESSENTIAL_SHELL = [
   "/",
-  "/static/app.css?v=52",
-  "/static/app.js?v=52",
+  "/static/app.css?v=53",
+  "/static/app.js?v=53",
   "/manifest.webmanifest"
 ];
 

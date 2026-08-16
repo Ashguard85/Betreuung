@@ -1,3 +1,8 @@
+# v53 – mehrtägige Einträge vollflächig im Jahresplan
+
+- Reine Fortsetzungstage füllen jetzt die ganze Betreuungsfläche der Jahreszelle.
+- Bei zusätzlichem eigenem Eintrag am selben Tag bleiben beide sichtbar.
+
 # v52 – kompakte Fortsetzungen im Jahresplan
 
 - Volle Zwischentage mehrtägiger Einträge zeigen im Jahresplan nur noch den Namen.

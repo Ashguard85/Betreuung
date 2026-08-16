@@ -630,3 +630,31 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
   .entry-datetime-range .entry-start-time-field{grid-column:1 / -1}
   .entry-datetime-range .entry-end-date-field .date-display{font-size:14px}
 }
+
+/* v53: full-cell annual display for a multi-day continuation if no separate
+   appointment starts on that day. If another entry exists, keep the compact
+   continuation pill so both remain visible. */
+.year-continuation.year-continuation-full{
+  position:absolute;
+  inset:2px;
+  width:auto;
+  max-width:none;
+  height:auto;
+  min-height:0;
+  margin:0;
+  padding:3px 4px;
+  border-radius:8px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  overflow:hidden;
+}
+.year-continuation.year-continuation-full span{
+  display:block;
+  width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-weight:700;
+}

@@ -658,3 +658,9 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
   white-space:nowrap;
   font-weight:700;
 }
+
+/* v56: readable before -> after details in the history list. */
+.history-diff{margin-top:5px;font-size:.82rem;line-height:1.32;color:var(--muted);max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+.history-diff-row+.history-diff-row{margin-top:2px}
+.history-diff-label{font-weight:700;color:var(--text)}
+.history-time{-webkit-line-clamp:unset!important;display:block!important}

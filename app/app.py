@@ -290,10 +290,14 @@ def init_db():
           action TEXT NOT NULL,
           entry_id INTEGER,
           snapshot TEXT NOT NULL DEFAULT '{}',
+          before_snapshot TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at DESC);
         """)
+        history_columns = {r["name"] for r in conn.execute("PRAGMA table_info(history)").fetchall()}
+        if "before_snapshot" not in history_columns:
+            conn.execute("ALTER TABLE history ADD COLUMN before_snapshot TEXT NOT NULL DEFAULT '{}'")
         # Backwards-compatible migration for databases created before timed entries existed.
         entry_columns = {r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
         if "all_day" not in entry_columns:
@@ -621,22 +625,45 @@ def set_setting(key, value):
     with db() as conn:
         conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(key,str(value)))
 
-def history_add(action, snapshot, entry_id=None):
+HISTORY_ENTRY_FIELDS = ("day", "end_day", "person_id", "person", "note", "all_day", "start_time", "end_time")
+
+def history_add(action, snapshot, entry_id=None, before_snapshot=None):
     with db() as conn:
-        conn.execute("INSERT INTO history(action,entry_id,snapshot,created_at) VALUES(?,?,?,?)",(action,entry_id,json.dumps(snapshot,ensure_ascii=False),datetime.now().isoformat(timespec="seconds")))
+        conn.execute(
+            "INSERT INTO history(action,entry_id,snapshot,before_snapshot,created_at) VALUES(?,?,?,?,?)",
+            (
+                action,
+                entry_id,
+                json.dumps(snapshot or {}, ensure_ascii=False),
+                json.dumps(before_snapshot or {}, ensure_ascii=False),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
         conn.execute("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 100)")
+
+def entry_snapshot_with_conn(conn, entry_id):
+    r=conn.execute(
+        "SELECT e.id,e.day,e.end_day,e.person_id,e.note,e.all_day,e.start_time,e.end_time,p.name AS person "
+        "FROM entries e JOIN people p ON p.id=e.person_id WHERE e.id=?",
+        (entry_id,),
+    ).fetchone()
+    return dict(r) if r else None
 
 def entry_snapshot(entry_id):
     with db() as conn:
-        r=conn.execute("SELECT e.id,e.day,e.end_day,e.person_id,e.note,e.all_day,e.start_time,e.end_time,p.name AS person FROM entries e JOIN people p ON p.id=e.person_id WHERE e.id=?",(entry_id,)).fetchone()
-    return dict(r) if r else None
+        return entry_snapshot_with_conn(conn, entry_id)
+
+def entry_snapshots_differ(before, after):
+    before = before or {}
+    after = after or {}
+    return any(before.get(key) != after.get(key) for key in HISTORY_ENTRY_FIELDS)
 
 
 @app.get("/api/history")
 @login_required
 def api_history():
     with db() as conn:
-        rows = conn.execute("SELECT id,action,entry_id,snapshot,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
+        rows = conn.execute("SELECT id,action,entry_id,snapshot,before_snapshot,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
     result=[]
     for row in rows:
         try:
@@ -644,7 +671,20 @@ def api_history():
             if not isinstance(snapshot, dict): snapshot={}
         except Exception:
             snapshot={}
-        result.append({"id":row["id"],"action":row["action"],"entry_id":row["entry_id"],"snapshot":snapshot,"created_at":row["created_at"]})
+        try:
+            before_snapshot=json.loads(row["before_snapshot"] or "{}")
+            if not isinstance(before_snapshot, dict): before_snapshot={}
+        except Exception:
+            before_snapshot={}
+        result.append({
+            "id":row["id"],
+            "action":row["action"],
+            "entry_id":row["entry_id"],
+            "snapshot":snapshot,
+            "after":snapshot,
+            "before":before_snapshot,
+            "created_at":row["created_at"],
+        })
     return jsonify(result)
 
 
@@ -860,9 +900,11 @@ def api_entries_add():
 
     now = datetime.now().isoformat(timespec="seconds")
     try:
+        before_snapshot = None
         with db() as conn:
             existing = conn.execute("SELECT id FROM entries WHERE day=?", (day,)).fetchone()
             if existing:
+                before_snapshot = entry_snapshot_with_conn(conn, existing["id"])
                 conn.execute(
                     "UPDATE entries SET end_day=?,person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=? WHERE id=?",
                     (end_day, person_id, note, all_day, start_time, end_time, now, existing["id"]),
@@ -877,7 +919,11 @@ def api_entries_add():
                 )
                 entry_id = cur.lastrowid
                 status = 201
-        history_add("updated" if status==200 else "created", entry_snapshot(entry_id), entry_id)
+        after_snapshot = entry_snapshot(entry_id)
+        if status == 201:
+            history_add("created", after_snapshot, entry_id)
+        elif entry_snapshots_differ(before_snapshot, after_snapshot):
+            history_add("updated", after_snapshot, entry_id, before_snapshot=before_snapshot)
         backup_db("entry")
         return jsonify({"id": entry_id, "day": day, "end_day": end_day}), status
     except sqlite3.IntegrityError as exc:
@@ -902,13 +948,18 @@ def api_entries_update(entry_id):
 
     try:
         with db() as conn:
+            before_snapshot = entry_snapshot_with_conn(conn, entry_id)
+            if not before_snapshot:
+                return jsonify({"error": "Eintrag nicht gefunden"}), 404
             conn.execute(
                 """UPDATE entries
                    SET day=?,end_day=?,person_id=?,note=?,all_day=?,start_time=?,end_time=?,updated_at=?
                    WHERE id=?""",
                 (day, end_day, person_id, note, all_day, start_time, end_time, datetime.now().isoformat(timespec="seconds"), entry_id),
             )
-        history_add("updated", entry_snapshot(entry_id), entry_id)
+        after_snapshot = entry_snapshot(entry_id)
+        if entry_snapshots_differ(before_snapshot, after_snapshot):
+            history_add("updated", after_snapshot, entry_id, before_snapshot=before_snapshot)
         backup_db("entry-update")
         return jsonify({"ok": True, "end_day": end_day})
     except sqlite3.IntegrityError:

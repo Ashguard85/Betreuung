@@ -899,12 +899,51 @@ function compactHistoryText(value, maxLen=120){
   return text.length>maxLen?text.slice(0,maxLen-1)+"…":text;
 }
 
+
+function historySnapshotPeriod(x){
+  if(!x?.day) return "";
+  const startDate=formatDateValue(x.day);
+  const endDay=x.end_day||x.day;
+  if(Number(x.all_day??1)===1){
+    return endDay && endDay!==x.day
+      ? `${startDate} bis ${formatDateValue(endDay)} · ganzer Tag`
+      : `${startDate} · ganzer Tag`;
+  }
+  const startTime=x.start_time||"";
+  const endTime=x.end_time||"";
+  const start=`${startDate}${startTime?` ${startTime}`:""}`;
+  const end=`${formatDateValue(endDay)}${endTime?` ${endTime}`:""}`;
+  return `${start} bis ${end}`;
+}
+
+function historyDiffHtml(before,after){
+  if(!before || !Object.keys(before).length || !after) return "";
+  const rows=[];
+  const add=(label,oldValue,newValue)=>{
+    const oldText=String(oldValue??"").trim()||"–";
+    const newText=String(newValue??"").trim()||"–";
+    if(oldText===newText) return;
+    rows.push(`<div class="history-diff-row"><span class="history-diff-label">${esc(label)}:</span> <span>${esc(oldText)} <b aria-label="wurde geändert zu">→</b> ${esc(newText)}</span></div>`);
+  };
+  add("Betreuung",before.person,after.person);
+  add("Zeitraum",historySnapshotPeriod(before),historySnapshotPeriod(after));
+  add("Bemerkung",before.note,after.note);
+  return rows.length?`<div class="history-diff">${rows.join("")}</div>`:"";
+}
+
+
 async function loadHistory(){
   const box=qs("#historyList"); if(!box) return;
   try{
     const rows=await api("/api/history");
     const labels={created:"Erstellt",updated:"Geändert",deleted:"Gelöscht",restored:"Wiederhergestellt"};
-    box.innerHTML=rows.length?rows.map(h=>{const x=h.snapshot||{};return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${x.note?" · "+esc(compactHistoryText(x.note)):""}</div></div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`}).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
+    box.innerHTML=rows.length?rows.map(h=>{
+      const x=h.after||h.snapshot||{};
+      const before=h.before||{};
+      const diff=h.action==="updated"?historyDiffHtml(before,x):"";
+      const legacyDetail=!diff && x.note?` · ${esc(compactHistoryText(x.note))}`:"";
+      return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small history-time">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${legacyDetail}</div>${diff}</div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`;
+    }).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
     qsa(".history-restore").forEach(b=>b.addEventListener("click",async()=>{try{await api(`/api/history/${b.dataset.id}/restore`,{method:"POST",body:"{}"});await loadEntries();await loadHistory();toast("Wiederhergestellt");}catch(e){toast(e.message);}}));
   }catch(e){
     console.error("Änderungsverlauf konnte nicht geladen werden", e);
@@ -989,7 +1028,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "55";
+const PWA_APP_VERSION = "56";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;
@@ -1080,27 +1119,24 @@ function waitForWorkerInstall(worker,timeoutMs=12000){
 
 async function inspectPwaRegistration(reg,{waitForInstall=false}={}){
   if(!reg) return "";
-  if(reg.waiting){
-    await announceWaitingWorker(reg.waiting);
-    return "waiting";
-  }
+
+  // A newer worker may already be installing while an older version is still
+  // waiting. Always finish/inspect the installing worker first so we never
+  // activate an avoidable intermediate release.
   if(reg.installing){
-    setPwaUpdateStatus("Neue PWA-Version wird im Hintergrund geladen …",false);
+    setPwaUpdateStatus("Neueste PWA-Version wird im Hintergrund geladen …",false);
     const worker=reg.installing;
     if(waitForInstall) await waitForWorkerInstall(worker);
-    if(reg.waiting){
-      await announceWaitingWorker(reg.waiting);
-      return "waiting";
-    }
-    if(worker.state==="installed" && navigator.serviceWorker.controller){
-      await announceWaitingWorker(worker);
-      return "waiting";
-    }
     if(worker.state==="redundant"){
       setPwaUpdateStatus("Update konnte nicht vollständig installiert werden. Bitte erneut prüfen.",false);
       return "failed";
     }
-    return "installing";
+    if(reg.installing && !["installed","activated","redundant"].includes(worker.state)) return "installing";
+  }
+
+  if(reg.waiting){
+    await announceWaitingWorker(reg.waiting);
+    return "waiting";
   }
   return "";
 }
@@ -1227,27 +1263,24 @@ async function registerPwa(){
     const reg=await navigator.serviceWorker.register("/service-worker.js",{scope:"/",updateViaCache:"none"});
     pwaRegistration=reg;
 
-    if(reg.waiting && navigator.serviceWorker.controller){
-      activateWaitingWorker(reg.waiting,{startup:true});
-      return "activating";
-    }
-    await inspectPwaRegistration(reg,{waitForInstall:false});
-
     reg.addEventListener("updatefound",()=>{
       const worker=reg.installing;
       if(!worker)return;
-      setPwaUpdateStatus("Neue PWA-Version wird im Hintergrund geladen …",false);
+      setPwaUpdateStatus("Neueste PWA-Version wird im Hintergrund geladen …",false);
       worker.addEventListener("statechange",async()=>{
-        if(worker.state==="installed" && navigator.serviceWorker.controller) await announceWaitingWorker(worker);
+        if(worker.state==="installed" && navigator.serviceWorker.controller) await inspectPwaRegistration(reg,{waitForInstall:false});
         if(worker.state==="installed" && !navigator.serviceWorker.controller) setPwaUpdateStatus("Offline-Basis installiert. Ab dem nächsten Start läuft die App aus dem lokalen App-Cache.",false);
         if(worker.state==="redundant") setPwaUpdateStatus("Update konnte nicht vollständig installiert werden. Bitte erneut prüfen.",false);
       });
     });
 
-    setTimeout(async()=>{
-      await checkPwaUpdate(true,{waitForInstall:false});
-      await inspectPwaRegistration(reg,{waitForInstall:false});
-    },1200);
+    const state=await checkPwaUpdate(true,{waitForInstall:true});
+    if(state==="waiting" && reg.waiting && navigator.serviceWorker.controller){
+      pwaWaitingWorker=reg.waiting;
+      activateWaitingWorker(reg.waiting,{startup:true});
+      return "activating";
+    }
+    await inspectPwaRegistration(reg,{waitForInstall:false});
   }catch(e){console.warn("PWA Service Worker konnte nicht registriert werden",e);setPwaUpdateStatus("PWA-Updateprüfung momentan nicht verfügbar.",false);}
 }
 

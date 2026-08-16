@@ -1,3 +1,12 @@
+# v56 – saubere Historie und Update-Reihenfolge
+
+- Bearbeitete Termine speichern ab jetzt den Vorher- und Nachher-Zustand.
+- „Letzte Änderungen“ zeigt konkret Betreuung, Zeitraum und Bemerkung als `von → auf`.
+- Alte History-Einträge bleiben erhalten und lesbar; es wird nichts gelöscht.
+- Reines erneutes Speichern ohne fachliche Änderung erzeugt keinen zusätzlichen „Geändert“-Eintrag.
+- Beim PWA-Start wird zuerst nach der neuesten Online-Version gesucht; erst danach wird ein wartender Worker aktiviert. Dadurch werden vermeidbare Zwischenversions-Sprünge verhindert.
+- Updates bleiben weiterhin vor laufenden Schreibvorgängen/Formularen geschützt.
+
 # v55 – zuverlässige PWA-Update-Erkennung
 
 - Behebt die Race Condition beim Erkennen eines bereits laufenden `installing` Workers.

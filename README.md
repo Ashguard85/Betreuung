@@ -1,3 +1,8 @@
+# v54 – Jahreskalender Runtime-Fix
+
+- Behebt `entry is not defined` aus v53 im Jahreskalender.
+- Die vollflächige Darstellung mehrtägiger Fortsetzungstage aus v53 bleibt unverändert.
+
 # v53 – mehrtägige Einträge vollflächig im Jahresplan
 
 - Reine Fortsetzungstage füllen jetzt die ganze Betreuungsfläche der Jahreszelle.

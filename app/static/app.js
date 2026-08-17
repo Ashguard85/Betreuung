@@ -2,6 +2,7 @@ let people = [];
 let entries = [];
 let periods = [];
 let calendarSubscriptions = [];
+let directIcalUrl = "";
 let selectedQuick = null;
 let selectedModal = null;
 let selectedBatch = null;
@@ -386,6 +387,35 @@ function exportParams(){
   if(!exportPeopleAreAll()) exportPeople.forEach(name=>params.append("person",name));
   return params;
 }
+
+function directAppleCalendarUrl(extraParams){
+  if(!directIcalUrl) return "";
+  try{
+    const url=new URL(directIcalUrl);
+    for(const [key,value] of extraParams.entries()){
+      if(key==="token" || key==="person_id") continue;
+      url.searchParams.append(key,value);
+    }
+    url.searchParams.set("open","1");
+    return url.toString();
+  }catch(_e){ return ""; }
+}
+function openDirectAppleCalendar(url){
+  if(!url) return false;
+  // This is a user-triggered top-level navigation to the existing read-only
+  // iCal-token endpoint. No Cloudflare Service-Token headers are required here.
+  window.location.href=url;
+  return true;
+}
+function directAppleCalendarForEntry(entryId){
+  const params=new URLSearchParams();
+  params.set("entry_id",String(entryId));
+  return directAppleCalendarUrl(params);
+}
+function directAppleCalendarForRange(){
+  return directAppleCalendarUrl(calendarRangeParams());
+}
+
 function calendarRangeParams(){
   const params=new URLSearchParams();
   const from=qs("#listRangeFrom")?.value || "";
@@ -621,6 +651,7 @@ function openModal(id=null){
   selectedModal=e?e.person_id:(people[0]?.id||null);
   renderPersonButtons("#modalPeople","modal");
   qs("#modalDuplicate").style.display=e?"block":"none";
+  qs("#modalAppleCalendar").style.display=e?"block":"none";
   qs("#modalShare").style.display=e?"block":"none";
   qs("#modalDelete").style.display=e?"block":"none";
   qs("#modalBack").classList.add("open");
@@ -872,6 +903,7 @@ async function loadConfig(){
   const c=await api("/api/config");
   qs("#dataFile").textContent=c.data_file+"  |  Backups: "+c.backup_dir;
   if(c.ical_enabled){
+    directIcalUrl=c.ical_url||"";
     qs("#icalBox").textContent=c.ical_url;
     qs("#copyIcal").style.display="";
     qs("#copyIcal").dataset.url=c.ical_url;
@@ -882,6 +914,7 @@ async function loadConfig(){
     qs("#icalSecurityHint").style.display="";
     renderPersonIcalFeeds(c.ical_person_urls||[]);
   }else{
+    directIcalUrl="";
     qs("#icalBox").textContent="Nicht aktiviert. In Portainer ICAL_TOKEN setzen.";
     qs("#copyIcal").style.display="none";
     qs("#showGlobalQr").style.display="none";
@@ -1028,7 +1061,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "56";
+const PWA_APP_VERSION = "57";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;
@@ -1229,7 +1262,7 @@ function applyOnlineState(){
     banner.hidden=serverReady;
     banner.textContent=!online?"Offline – App-Oberfläche läuft lokal. Änderungen sind deaktiviert.":"Datenserver nicht erreichbar – letzter lesbarer Stand. Änderungen sind deaktiviert.";
   }
-  ["#quickSave","#modalSave","#modalDuplicate","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
+  ["#quickSave","#modalSave","#modalDuplicate","#modalAppleCalendar","#modalShare","#modalDelete","#openBatch","#batchPreview","#addPerson","#addPeriod"].forEach(sel=>{
     const el=qs(sel); if(el) el.disabled=!serverReady;
   });
   qsa("#importForm input,#importForm button,#icsImportForm input,#icsImportForm button,#fullDataImportForm input,#fullDataImportForm button,#peopleSettings input,#peopleSettings button,#periodList button,#newPerson,#newColor,#periodStart,#periodEnd,#periodKind,#periodLabel,#periodColor,#subName,#subUrl,#subKind,#subColor,#addSubscription,#subscriptionList button,#subscriptionList input,#batchModalBack input,#batchModalBack select").forEach(el=>el.disabled=!serverReady);
@@ -1367,8 +1400,17 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     editingId=null; qs("#modalTitle").textContent="Termin duplizieren";
     qs("#modalDate").value=addDaysIso(e.day,7); syncDateShell(qs("#modalDate"));
     if(qs("#modalEndDate")){ qs("#modalEndDate").value=addDaysIso(entryEndDay(e),7); syncDateShell(qs("#modalEndDate")); syncOvernight("modal"); }
-    qs("#modalDelete").style.display="none"; qs("#modalShare").style.display="none"; qs("#modalDuplicate").style.display="none";
+    qs("#modalDelete").style.display="none"; qs("#modalAppleCalendar").style.display="none"; qs("#modalShare").style.display="none"; qs("#modalDuplicate").style.display="none";
     toast("Neues Datum wählen und speichern");
+  });
+  qs("#modalAppleCalendar")?.addEventListener("click",()=>{
+    if(!editingId) return;
+    const direct=directAppleCalendarForEntry(editingId);
+    if(direct && openDirectAppleCalendar(direct)) return;
+    const e=entries.find(x=>Number(x.id)===Number(editingId));
+    const fallback=e?`betreuung-${e.day}.ics`:`betreuung.ics`;
+    toast("Direkter Apple-Kalender-Link ist nicht aktiviert – öffne Teilen als Fallback");
+    shareServerFile(`/api/entries/${editingId}/ics`,fallback,"text/calendar","Kalendereintrag wird erstellt …");
   });
   qs("#modalShare").addEventListener("click",()=>{
     if(!editingId) return;
@@ -1397,11 +1439,9 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     const from=qs("#listRangeFrom").value, to=qs("#listRangeTo").value;
     if(!from || !to) return toast("Von und Bis wählen");
     if(from>to) return toast("Von liegt nach Bis");
-    const url=qs("#listAppleCalendarButton").dataset.url;
-    if(!url) return;
-    // Direct navigation is intentional: iOS handles an inline text/calendar response
-    // more reliably than a File object shared from an installed PWA.
-    window.location.href=url;
+    const direct=directAppleCalendarForRange();
+    if(direct && openDirectAppleCalendar(direct)) return;
+    shareServerFile(qs("#listIcsButton").dataset.url,`betreuung-${from}-bis-${to}.ics`,"text/calendar","Kalenderdatei wird erstellt …");
   });
   qs("#filterSearch").addEventListener("input",renderList);
   qs("#yearSelect").addEventListener("change",()=>{renderYear();renderStatsByPerson();});

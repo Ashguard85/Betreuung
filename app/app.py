@@ -2388,9 +2388,20 @@ def entry_ics_export(entry_id):
 
 @app.get("/calendar.ics")
 def calendar_ics():
+    """Read-only iCalendar feed and direct Apple Calendar hand-off.
+
+    The path remains protected by the existing long iCal bearer token.  Optional
+    filters only reduce what that already-authorized token may read; they never
+    grant additional access and no write operation is exposed here.
+    """
     token = request.args.get("token", "")
     person_id_raw = request.args.get("person_id", "").strip()
+    entry_id_raw = request.args.get("entry_id", "").strip()
+    start_raw = request.args.get("from", "").strip()
+    end_raw = request.args.get("to", "").strip()
     person_row = None
+    person_id = None
+
     if person_id_raw:
         try:
             person_id = int(person_id_raw)
@@ -2400,16 +2411,54 @@ def calendar_ics():
             person_row = conn.execute("SELECT id,name,calendar_token FROM people WHERE id=?", (person_id,)).fetchone()
         if not person_row or not hmac.compare_digest(token, person_row["calendar_token"]):
             return Response("Not found", status=404)
-        rows = entry_rows("p.id = ?", (person_id,))
     else:
         if not ICAL_TOKEN or not hmac.compare_digest(token, ICAL_TOKEN):
             return Response("Not found", status=404)
-        rows = entry_rows()
+
+    filename = "betreuung.ics"
+    cal_name = f"{APP_TITLE} – {person_row['name']}" if person_row else APP_TITLE
+
+    if entry_id_raw:
+        try:
+            entry_id = int(entry_id_raw)
+        except ValueError:
+            return Response("Not found", status=404)
+        if person_id is not None:
+            rows = entry_rows("e.id = ? AND p.id = ?", (entry_id, person_id))
+        else:
+            rows = entry_rows("e.id = ?", (entry_id,))
+        if not rows:
+            return Response("Not found", status=404)
+        filename = f"betreuung-{rows[0]['day']}-{entry_id}.ics"
+        cal_name = f"{APP_TITLE} – {rows[0]['person']}"
+    elif start_raw or end_raw:
+        # One-time range import is intentionally available only with the global
+        # feed token. Person feed tokens continue to expose only their feed/single
+        # matching entry and cannot be turned into arbitrary global searches.
+        if person_id is not None:
+            return Response("Not found", status=404)
+        start_day = valid_iso_day(start_raw)
+        end_day = valid_iso_day(end_raw)
+        if not start_day or not end_day or start_day > end_day:
+            return Response("Ungültiger Zeitraum", status=400)
+        if (date.fromisoformat(end_day) - date.fromisoformat(start_day)).days > 3660:
+            return Response("Zeitraum ist zu groß", status=400)
+        people_filter = [p.strip() for p in request.args.getlist("person") if p.strip()]
+        search = request.args.get("q", "").strip()
+        rows = rows_for_calendar_range(start_day, end_day, people_filter, search)
+        filename = f"betreuung-{start_day}-bis-{end_day}.ics"
+        cal_name = ICAL_EXPORT_NAME
+    else:
+        rows = entry_rows("p.id = ?", (person_id,)) if person_id is not None else entry_rows()
 
     host = request.host.split(":")[0]
-    cal_name = f"{APP_TITLE} – {person_row['name']}" if person_row else APP_TITLE
     body = build_ics_calendar(rows, host, cal_name)
-    return Response(body, mimetype="text/calendar; charset=utf-8")
+    disposition = "inline" if request.args.get("open") == "1" else "attachment"
+    return Response(
+        body,
+        mimetype="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
 
 
 @app.get("/api/stats")

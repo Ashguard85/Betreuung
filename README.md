@@ -1,3 +1,11 @@
+# v57 – direkter Apple-Kalender-Aufruf
+
+- Ein gespeicherter Termin hat im Bearbeiten-Dialog jetzt ` In Apple Kalender`.
+- Der Listen-Button ` Apple Kalender` funktioniert jetzt auch aus der GitHub-Pages-PWA mit Cloudflare Service Auth.
+- Direkte Apple-Aufrufe verwenden den bereits vorhandenen read-only `/calendar.ics`-Pfad mit langem iCal-Token. Es ist kein zusätzlicher Cloudflare-Bypass nötig, wenn `/calendar.ics` wie bisher gezielt freigegeben ist.
+- `/calendar.ics` unterstützt nun optional `entry_id` oder `from`/`to` plus die bestehenden Personen-/Suchfilter. Diese Filter reduzieren ausschließlich die Ausgabe; der Pfad bleibt schreibgeschützt.
+- Wenn `ICAL_TOKEN` nicht aktiviert ist, fällt die Oberfläche auf den bisherigen authentifizierten Datei-Teilen-Weg zurück.
+
 # v56 – saubere Historie und Update-Reihenfolge
 
 - Bearbeitete Termine speichern ab jetzt den Vorher- und Nachher-Zustand.

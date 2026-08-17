@@ -51,3 +51,7 @@ Die bisherige Variable `PWA_ALLOWED_ORIGIN` bleibt weiterhin unterstützt.
 ## iCal-Abos
 
 `/calendar.ics` bleibt ein Sonderfall: Apple Kalender kann das Cloudflare-Service-Token nicht als Custom Header senden. Falls Kalender-Abos verwendet werden, den bestehenden gezielten Cloudflare-Bypass nur für `/calendar.ics` beibehalten; der lange iCal-Token der App bleibt die Absicherung dieses Endpunkts.
+
+## Apple-Kalender-Direktimport
+
+Der Direktimport nutzt den vorhandenen read-only `/calendar.ics`-Bypass mit `ICAL_TOKEN`. `/export.ics` und `/api/entries/.../ics` bleiben hinter normalem Access/Login; dafür ist kein neuer Bypass nötig.

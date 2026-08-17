@@ -1,3 +1,11 @@
+# v59 - Jahresplan-PDF nutzt die A4-Hoehe besser
+
+- Die 31 Tageszeilen im Jahres-/Mehrmonats-PDF werden jetzt dynamisch hoeher.
+- Der vorhandene Leerraum unter dem Kalender wird fuer groessere Tagesfelder genutzt.
+- Titel, Legende und Fusszeile bleiben auf derselben A4-Seite.
+- Bei mehr Legendenzeilen wird die Tabellenhoehe automatisch etwas reduziert, damit kein Umbruch auf eine zweite Seite entsteht.
+- Monats-PDF mit nur einem Monat bleibt unveraendert.
+
 # v58 – getrennte UID für manuellen Kalenderimport
 
 - Abo-/Feed-Termine behalten ihre bisherige UID `betreuung-<id>@host`.

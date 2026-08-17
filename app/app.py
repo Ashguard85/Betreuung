@@ -1848,11 +1848,52 @@ def export_year_pdf():
         textColor=colors.HexColor("#1e2524"),
     )
 
+    # Build the legend before choosing the row height.  The old fixed 4.1 mm
+    # annual rows left a large unused area at the bottom of landscape A4.  The
+    # annual grid now grows vertically into the available frame while reserving
+    # enough space for title, legend and a small safety buffer.
+    legend_items = []
+    used_people = []
+    seen_people = set()
+    for entry in list(display_entries) + list(continuation_by_day.values()):
+        key = (entry["person"], entry["color"])
+        if key not in seen_people:
+            seen_people.add(key)
+            used_people.append(key)
+    legend_items.extend(used_people)
+    legend_items.append(("Wochenende", "#fff2b9"))
+    if continuation_by_day:
+        legend_items.append(("Fort. = mehrtägiger Eintrag", "#e4efeb"))
+
+    kind_names = {"vacation": "Ferien", "holiday": "Feiertage", "other": "Markierung"}
+    seen_period_legend = set()
+    for period in display_periods:
+        key = (kind_names.get(period.get("kind"), period.get("label") or "Markierung"), period.get("color") or "#80a4c2")
+        if key not in seen_period_legend:
+            seen_period_legend.add(key)
+            legend_items.append(key)
+
+    per_row = 3 if single_month else 7
+    legend_row_count = (len(legend_items) + per_row - 1) // per_row
+
     usable_w = page_size[0] - doc.leftMargin - doc.rightMargin
+    usable_h = page_size[1] - doc.topMargin - doc.bottomMargin
     day_col_w = 10 * mm if single_month else 6.2 * mm
     month_w = (usable_w - 2 * day_col_w) / len(month_indices)
     header_h = 6 * mm if single_month else 4.5 * mm
-    day_h = 5.8 * mm if single_month else 4.1 * mm
+
+    if single_month:
+        day_h = 5.8 * mm
+    else:
+        title_probe = Paragraph(plan_title, title_style)
+        _, title_content_h = title_probe.wrap(usable_w, usable_h)
+        title_total_h = title_content_h + title_style.spaceAfter
+        # Each legend item has a fixed 3.7 mm row plus 0.5 pt top/bottom
+        # padding on the outer legend table.
+        legend_h_est = legend_row_count * ((3.7 * mm) + 1.0)
+        vertical_buffer = 6.0 * mm
+        available_for_days = usable_h - title_total_h - header_h - (0.8 * mm) - legend_h_est - vertical_buffer
+        day_h = max(4.1 * mm, min(5.8 * mm, available_for_days / 31.0))
 
     data = [[Paragraph("Tag", head_style)] +
             [Paragraph(month_names[m - 1], head_style) for m in month_indices] +
@@ -1911,29 +1952,7 @@ def export_year_pdf():
     )
     year_table.setStyle(TableStyle(style_cmds))
 
-    legend_items = []
-    used_people = []
-    seen_people = set()
-    for entry in list(display_entries) + list(continuation_by_day.values()):
-        key = (entry["person"], entry["color"])
-        if key not in seen_people:
-            seen_people.add(key)
-            used_people.append(key)
-    legend_items.extend(used_people)
-    legend_items.append(("Wochenende", "#fff2b9"))
-    if continuation_by_day:
-        legend_items.append(("Fort. = mehrtägiger Eintrag", "#e4efeb"))
-
-    kind_names = {"vacation": "Ferien", "holiday": "Feiertage", "other": "Markierung"}
-    seen_period_legend = set()
-    for period in display_periods:
-        key = (kind_names.get(period.get("kind"), period.get("label") or "Markierung"), period.get("color") or "#80a4c2")
-        if key not in seen_period_legend:
-            seen_period_legend.add(key)
-            legend_items.append(key)
-
     legend_rows = []
-    per_row = 3 if single_month else 7
     for i in range(0, len(legend_items), per_row):
         chunk = legend_items[i:i + per_row]
         row = [_legend_item(label, color_value, width=(usable_w / per_row) - 1 * mm) for label, color_value in chunk]

@@ -2263,12 +2263,21 @@ def ical_event_title(r):
     return template.replace("{person}", person).replace("{app}", APP_TITLE)
 
 
-def entry_ics_event_lines(r, host):
+def entry_ics_event_lines(r, host, uid_mode="feed"):
+    """Build one VEVENT.
+
+    Feed/subscription events keep the historic stable UID ``betreuung-<id>``.
+    One-time/manual imports use a separate but equally stable UID
+    ``betreuung-manual-<id>``.  This prevents Apple Calendar from treating a
+    manual import as the already-present read-only subscription event, while
+    repeated manual imports of the same entry still identify the same event.
+    """
     day_compact = r["day"].replace("-", "")
     dtstamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    uid_prefix = "betreuung-manual" if uid_mode == "manual" else "betreuung"
     lines = [
         "BEGIN:VEVENT",
-        f"UID:betreuung-{r['id']}@{host}",
+        f"UID:{uid_prefix}-{r['id']}@{host}",
         f"DTSTAMP:{dtstamp}",
     ]
     if r.get("all_day", 1):
@@ -2297,7 +2306,7 @@ def entry_ics_event_lines(r, host):
     return lines
 
 
-def build_ics_calendar(rows, host, calendar_name):
+def build_ics_calendar(rows, host, calendar_name, uid_mode="feed"):
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -2307,7 +2316,7 @@ def build_ics_calendar(rows, host, calendar_name):
         f"X-WR-CALNAME:{ics_escape(calendar_name)}",
     ]
     for row in rows:
-        lines.extend(entry_ics_event_lines(row, host))
+        lines.extend(entry_ics_event_lines(row, host, uid_mode=uid_mode))
     lines.append("END:VCALENDAR")
     return "\r\n".join(lines) + "\r\n"
 
@@ -2350,7 +2359,7 @@ def export_ics_range():
     # The one-time ICS export uses a dedicated configurable calendar name.
     # This is independent from the individual event titles.
     calendar_name = ICAL_EXPORT_NAME
-    body = build_ics_calendar(rows, host, calendar_name)
+    body = build_ics_calendar(rows, host, calendar_name, uid_mode="manual")
     filename = f"betreuung-{start_day}-bis-{end_day}.ics"
     disposition = "inline" if request.args.get("open") == "1" else "attachment"
     return Response(
@@ -2374,7 +2383,7 @@ def entry_ics_export(entry_id):
         return Response("Not found", status=404)
     row = rows[0]
     host = request.host.split(":")[0]
-    body = build_ics_calendar([row], host, f"{APP_TITLE} – {row['person']}")
+    body = build_ics_calendar([row], host, f"{APP_TITLE} – {row['person']}", uid_mode="manual")
     filename = f"betreuung-{row['day']}-{entry_id}.ics"
     return Response(
         body,
@@ -2452,7 +2461,12 @@ def calendar_ics():
         rows = entry_rows("p.id = ?", (person_id,)) if person_id is not None else entry_rows()
 
     host = request.host.split(":")[0]
-    body = build_ics_calendar(rows, host, cal_name)
+    # A direct one-time import must not reuse the subscription/feed UID, otherwise
+    # Apple Calendar can resolve it to the existing read-only subscribed event.
+    # Keep a stable manual UID per entry so importing the same entry again does not
+    # intentionally manufacture a new UID each time.
+    uid_mode = "manual" if (entry_id_raw or start_raw or end_raw) else "feed"
+    body = build_ics_calendar(rows, host, cal_name, uid_mode=uid_mode)
     disposition = "inline" if request.args.get("open") == "1" else "attachment"
     return Response(
         body,

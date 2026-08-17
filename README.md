@@ -1,3 +1,10 @@
+# v58 – getrennte UID für manuellen Kalenderimport
+
+- Abo-/Feed-Termine behalten ihre bisherige UID `betreuung-<id>@host`.
+- Einzel- und Bereichsimporte verwenden jetzt stabil `betreuung-manual-<id>@host`.
+- Dadurch verwechselt Apple Kalender den manuellen Import nicht mehr mit dem read-only Abo-Termin.
+- Derselbe Betreuungseintrag behält bei wiederholtem manuellen Import dieselbe Manual-UID.
+
 # v57 – direkter Apple-Kalender-Aufruf
 
 - Ein gespeicherter Termin hat im Bearbeiten-Dialog jetzt ` In Apple Kalender`.

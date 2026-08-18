@@ -3,3 +3,5 @@ gunicorn==23.0.0
 reportlab==4.4.9
 requests==2.32.5
 qrcode[pil]==8.2
+
+pywebpush==2.4.0

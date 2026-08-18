@@ -16,16 +16,244 @@ let editingId = null;
 const qs = s => document.querySelector(s);
 const qsa = s => [...document.querySelectorAll(s)];
 
+const DEVICE_ID_KEY="betreuung-device-id";
+const DEVICE_NAME_KEY="betreuung-device-name";
+let unreadChanges=[];
+let unreadChangeCount=0;
+let pushConfig=null;
+let pushMessageWired=false;
+
+function installedStandalone(){
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || navigator.standalone===true;
+}
+function defaultDeviceName(){
+  const ua=navigator.userAgent||"";
+  if(/iPhone|iPad|iPod/i.test(ua)) return installedStandalone()?"iPhone PWA":"iPhone Browser";
+  if(/Android/i.test(ua)) return installedStandalone()?"Android PWA":"Android Browser";
+  return installedStandalone()?"PWA":"Browser";
+}
+function getDeviceId(){
+  try{
+    let value=localStorage.getItem(DEVICE_ID_KEY)||"";
+    if(!/^[A-Za-z0-9_-]{8,128}$/.test(value)){
+      value=crypto.randomUUID?crypto.randomUUID():`dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
+      localStorage.setItem(DEVICE_ID_KEY,value);
+    }
+    return value;
+  }catch(_e){
+    if(!window.__betreuungDeviceId) window.__betreuungDeviceId=`dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
+    return window.__betreuungDeviceId;
+  }
+}
+function getDeviceName(){
+  try{return (localStorage.getItem(DEVICE_NAME_KEY)||"").trim()||defaultDeviceName();}catch(_e){return defaultDeviceName();}
+}
+function storeDeviceName(value){
+  const clean=String(value||"").trim().slice(0,80)||defaultDeviceName();
+  try{localStorage.setItem(DEVICE_NAME_KEY,clean);}catch(_e){}
+  return clean;
+}
+async function registerDeviceOnServer(){
+  const name=getDeviceName();
+  const result=await api("/api/devices/register",{method:"POST",body:JSON.stringify({name})});
+  if(result?.name && result.name!==name) storeDeviceName(result.name);
+  const input=qs("#pushDeviceName"); if(input) input.value=getDeviceName();
+  return result;
+}
+function setAppBadgeCount(count){
+  const n=Math.max(0,Number(count)||0);
+  try{
+    if(n>0 && navigator.setAppBadge) navigator.setAppBadge(n).catch(()=>{});
+    else if(n===0 && navigator.clearAppBadge) navigator.clearAppBadge().catch(()=>{});
+  }catch(_e){}
+}
+function updateHomeChangesLink(count){
+  unreadChangeCount=Math.max(0,Number(count)||0);
+  const link=qs("#homeChangesLink");
+  if(!link) return;
+  link.hidden=unreadChangeCount<=0;
+  const title=qs("#homeChangesTitle");
+  const subtitle=qs("#homeChangesSubtitle");
+  if(title) title.textContent=unreadChangeCount===1?"1 neue Änderung":`${unreadChangeCount} neue Änderungen`;
+  if(subtitle) subtitle.textContent="Auf diesem Gerät noch nicht gelesen";
+  setAppBadgeCount(unreadChangeCount);
+}
+function changeActionLabel(action){
+  return {created:"Neu",updated:"Geändert",deleted:"Gelöscht",restored:"Wiederhergestellt"}[action]||"Geändert";
+}
+function changeItemHtml(h){
+  const x=h.after||h.snapshot||{};
+  const before=h.before||{};
+  const diff=h.action==="updated"?historyDiffHtml(before,x):"";
+  const date=formatDateValue(x.day||"");
+  const person=x.person||"Betreuung";
+  const source=h.source_device_name?`<span class="change-device">${esc(h.source_device_name)}</span>`:"";
+  const canOpen=h.action!=="deleted" && h.entry_id;
+  const inner=`<div class="change-item-head"><strong>${esc(changeActionLabel(h.action))} · ${esc(date)} · ${esc(person)}</strong><span class="spacer"></span>${source}</div><div class="change-item-time">${esc(new Date(h.created_at).toLocaleString("de-CH"))}</div>${diff}`;
+  return `<div class="change-item ${h.action==="deleted"?"change-deleted":""}" data-change-id="${h.id}" data-change-entry="${h.entry_id||""}" data-change-action="${esc(h.action)}">${canOpen?`<button class="change-item-button" type="button">${inner}</button>`:inner}</div>`;
+}
+function renderChangesModal(){
+  const list=qs("#changesList"); if(!list)return;
+  list.innerHTML=unreadChanges.length?unreadChanges.map(changeItemHtml).join(""):'<div class="small">Keine neuen Änderungen.</div>';
+  const intro=qs("#changesIntro");
+  if(intro) intro.textContent=unreadChangeCount===1?"1 Änderung ist auf einem anderen Gerät entstanden.":`${unreadChangeCount} Änderungen sind auf einem anderen Gerät entstanden.`;
+  const mark=qs("#changesMarkAllRead"); if(mark) mark.disabled=unreadChangeCount<=0;
+}
+async function loadUnreadChanges({renderModal=false}={}){
+  try{
+    const result=await api("/api/changes/unread");
+    unreadChanges=Array.isArray(result?.changes)?result.changes:[];
+    updateHomeChangesLink(result?.count||0);
+    if(renderModal) renderChangesModal();
+    return result;
+  }catch(e){
+    if(renderModal){const list=qs("#changesList");if(list)list.innerHTML=`<div class="small danger">${esc(e.message||"Änderungen konnten nicht geladen werden")}</div>`;}
+    return null;
+  }
+}
+async function openChangesModal(){
+  showPage("home",{scroll:false});
+  qs("#changesModalBack")?.classList.add("open");
+  document.body.classList.add("modal-open");
+  await loadUnreadChanges({renderModal:true});
+}
+function closeChangesModal(){
+  qs("#changesModalBack")?.classList.remove("open");
+  if(!qs("#modalBack")?.classList.contains("open")&&!qs("#batchModalBack")?.classList.contains("open")) document.body.classList.remove("modal-open");
+}
+async function markChangesRead(ids=null){
+  const payload=ids?{ids}:{all:true};
+  const result=await api("/api/changes/read",{method:"POST",body:JSON.stringify(payload)});
+  await loadUnreadChanges({renderModal:true});
+  return result;
+}
+async function openUnreadChange(changeId,entryId,action){
+  await markChangesRead([Number(changeId)]);
+  closeChangesModal();
+  if(action==="deleted" || !entryId){toast("Dieser Eintrag wurde gelöscht.");return;}
+  try{await loadEntries();}catch(_e){}
+  const entry=entries.find(x=>Number(x.id)===Number(entryId));
+  if(entry) openModal(Number(entryId));
+  else toast("Der Eintrag ist nicht mehr vorhanden.");
+}
+function urlBase64ToUint8Array(value){
+  const padding="=".repeat((4-value.length%4)%4);
+  const base64=(value+padding).replace(/-/g,"+").replace(/_/g,"/");
+  const raw=atob(base64); const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i);
+  return out;
+}
+function pushBrowserSupported(){
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+function pushIOSNeedsInstall(){
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent||"") && !installedStandalone();
+}
+function setPushStatus(text,kind=""){
+  const el=qs("#pushStatus"); if(!el)return;
+  el.textContent=text||"";el.classList.remove("ok","danger");if(kind)el.classList.add(kind);
+}
+async function loadPushSettings(){
+  const input=qs("#pushDeviceName"); if(input) input.value=getDeviceName();
+  if(!pushBrowserSupported()){
+    setPushStatus("Dieser Browser unterstützt Web Push nicht.","danger");
+    if(qs("#pushEnable"))qs("#pushEnable").hidden=true;
+    return;
+  }
+  if(pushIOSNeedsInstall()){
+    setPushStatus("Auf iPhone/iPad Push bitte in der installierten Home-Screen-PWA aktivieren.");
+  }
+  try{
+    pushConfig=await api("/api/push/config");
+    if(!pushConfig.enabled){setPushStatus(pushConfig.error||"Web Push ist serverseitig nicht verfügbar.","danger");return;}
+    const reg=await navigator.serviceWorker.ready;
+    const localSub=await reg.pushManager.getSubscription();
+    const active=Boolean(localSub && pushConfig.subscribed);
+    qs("#pushEnable").hidden=active;
+    qs("#pushDisable").hidden=!active;
+    qs("#pushTest").hidden=!active;
+    if(active) setPushStatus(`Push aktiv · ${getDeviceName()}`,"ok");
+    else if(Notification.permission==="denied") setPushStatus("Push wurde für diese PWA in den Systemeinstellungen abgelehnt.","danger");
+    else setPushStatus(pushIOSNeedsInstall()?"Für Push die installierte Home-Screen-PWA verwenden.":"Push ist auf diesem Gerät noch nicht aktiviert.");
+  }catch(e){setPushStatus(e.message||"Push-Status konnte nicht geladen werden","danger");}
+}
+async function enablePush(){
+  if(!pushBrowserSupported()) return toast("Web Push wird hier nicht unterstützt");
+  if(pushIOSNeedsInstall()) return toast("Auf iPhone bitte die installierte Home-Screen-PWA verwenden");
+  try{
+    const permission=await Notification.requestPermission();
+    if(permission!=="granted") throw new Error("Benachrichtigungen wurden nicht erlaubt");
+    if(!pushConfig?.public_key) pushConfig=await api("/api/push/config");
+    if(!pushConfig?.public_key) throw new Error(pushConfig?.error||"Push-Schlüssel fehlt");
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(pushConfig.public_key)});
+    }
+    await api("/api/push/subscribe",{method:"POST",body:JSON.stringify({device_name:getDeviceName(),subscription:sub.toJSON()})});
+    toast("Push aktiviert");
+    await loadPushSettings();
+    await loadUnreadChanges();
+  }catch(e){setPushStatus(e.message||"Push konnte nicht aktiviert werden","danger");toast(e.message||"Push konnte nicht aktiviert werden");}
+}
+async function disablePush(){
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub) await sub.unsubscribe();
+    await api("/api/push/unsubscribe",{method:"POST",body:"{}"});
+    setAppBadgeCount(0);
+    toast("Push deaktiviert");
+    await loadPushSettings();
+  }catch(e){toast(e.message||"Push konnte nicht deaktiviert werden");}
+}
+async function saveDeviceName(){
+  const name=storeDeviceName(qs("#pushDeviceName")?.value);
+  if(qs("#pushDeviceName"))qs("#pushDeviceName").value=name;
+  try{await registerDeviceOnServer();toast("Gerätename gespeichert");await loadPushSettings();}catch(e){toast(e.message);}
+}
+async function sendPushTest(){
+  try{await api("/api/push/test",{method:"POST",body:"{}"});toast("Test-Mitteilung wird gesendet");}catch(e){toast(e.message);}
+}
+function wirePushMessageListener(){
+  if(pushMessageWired || !("serviceWorker" in navigator)) return;
+  pushMessageWired=true;
+  navigator.serviceWorker.addEventListener("message",event=>{
+    const data=event.data||{};
+    if(data.type==="PUSH_CHANGES"){
+      if(Number.isFinite(Number(data.unread_count))) updateHomeChangesLink(Number(data.unread_count));
+      loadUnreadChanges({renderModal:qs("#changesModalBack")?.classList.contains("open")});
+    }else if(data.type==="OPEN_CHANGES"){
+      openChangesModal();
+    }
+  });
+}
+async function handleChangesDeepLink(){
+  const params=new URLSearchParams(location.search);
+  if(params.get("changes")!=="1") return;
+  try{history.replaceState({},"",location.pathname+location.hash);}catch(_e){}
+  await openChangesModal();
+}
+
+
 async function api(url, options={}) {
   const method=(options.method||"GET").toUpperCase();
   const write=method!=="GET" && method!=="HEAD" && method!=="OPTIONS";
   if(write && !serverWriteAvailable()) throw new Error(navigator.onLine ? "Datenserver nicht erreichbar - Änderungen sind nicht möglich" : "Offline - Änderungen sind nicht möglich");
   let res;
+  const headers=new Headers(options.headers||{});
+  if(!(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type","application/json");
   if(write) beginPwaWrite();
   try {
-    res = await fetch(url, {
-      headers: {"Content-Type":"application/json", ...(options.headers||{})},
-      ...options
+    let requestUrl=url;
+    try{
+      const parsed=new URL(url,location.origin);
+      if(parsed.pathname.startsWith("/api/")) parsed.searchParams.set("_device",getDeviceId());
+      requestUrl=parsed.pathname+parsed.search+parsed.hash;
+    }catch(_e){}
+    res = await fetch(requestUrl, {
+      ...options,
+      headers
     });
     setBackendReachable(res.headers.get("X-PWA-Offline-Cache")!=="1");
   } catch (err) {
@@ -322,7 +550,7 @@ function showPage(name,{persist=true,scroll=true}={}){
   if(persist) rememberPage(name);
   if(name==="list") renderList();
   if(name==="year"){ renderYear(); renderStatsByPerson(); }
-  if(name==="settings"){ loadConfig(); renderPeriodSettings(); }
+  if(name==="settings"){ loadConfig(); renderPeriodSettings(); loadPushSettings(); }
   if(scroll) window.scrollTo({top:0,behavior:"smooth"});
 }
 function renderNext(){
@@ -975,7 +1203,8 @@ async function loadHistory(){
       const before=h.before||{};
       const diff=h.action==="updated"?historyDiffHtml(before,x):"";
       const legacyDetail=!diff && x.note?` · ${esc(compactHistoryText(x.note))}`:"";
-      return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small history-time">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${legacyDetail}</div>${diff}</div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`;
+      const sourceDetail=h.source_device_name?` · ${esc(h.source_device_name)}`:"";
+      return `<div class="history-item"><div><b>${labels[h.action]||esc(h.action)}</b> · ${esc(formatDateValue(x.day||""))} · ${esc(x.person||"")}<div class="small history-time">${esc(new Date(h.created_at).toLocaleString("de-CH"))}${sourceDetail}${legacyDetail}</div>${diff}</div>${h.action==="deleted"?`<button class="secondary history-restore" data-id="${h.id}">Wiederherstellen</button>`:""}</div>`;
     }).join(""):'<div class="small">Noch keine Änderungen protokolliert.</div>';
     qsa(".history-restore").forEach(b=>b.addEventListener("click",async()=>{try{await api(`/api/history/${b.dataset.id}/restore`,{method:"POST",body:"{}"});await loadEntries();await loadHistory();toast("Wiederhergestellt");}catch(e){toast(e.message);}}));
   }catch(e){
@@ -1061,7 +1290,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "59";
+const PWA_APP_VERSION = "60";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;
@@ -1286,8 +1515,11 @@ async function probeBackend(){
 
 async function refreshAfterReconnect(){
   if(!(await probeBackend())) return;
-  try{await loadPeople();await loadEntries();await loadPeriods();await loadConfig();toast("Datenserver wieder erreichbar - Daten aktualisiert");}
-  catch(e){toast(e.message);}
+  try{
+    await loadPeople();await loadEntries();await loadPeriods();await loadConfig();
+    await registerDeviceOnServer();await loadUnreadChanges();await loadPushSettings();
+    toast("Datenserver wieder erreichbar - Daten aktualisiert");
+  }catch(e){toast(e.message);}
 }
 
 async function registerPwa(){
@@ -1334,6 +1566,25 @@ document.addEventListener("click",e=>{
 
 document.addEventListener("DOMContentLoaded", async ()=>{
   wirePwaUpdateUi();
+  wirePushMessageListener();
+  qs("#homeChangesLink")?.addEventListener("click",openChangesModal);
+  qs("#changesClose")?.addEventListener("click",closeChangesModal);
+  qs("#changesModalBack")?.addEventListener("click",e=>{if(e.target===qs("#changesModalBack"))closeChangesModal();});
+  qs("#changesMarkAllRead")?.addEventListener("click",async()=>{try{await markChangesRead();toast("Änderungen als gelesen markiert");}catch(e){toast(e.message);}});
+  qs("#changesOpenHistory")?.addEventListener("click",()=>{
+    closeChangesModal();showPage("settings");
+    const historyDetails=[...document.querySelectorAll("#settingsPage details.settings-disclosure")].find(d=>d.querySelector("summary")?.textContent.trim()==="Letzte Änderungen");
+    if(historyDetails){historyDetails.open=true;historyDetails.scrollIntoView({behavior:"smooth",block:"start"});}
+  });
+  qs("#changesList")?.addEventListener("click",e=>{
+    const item=e.target.closest(".change-item[data-change-id]");
+    if(!item || !e.target.closest(".change-item-button")) return;
+    openUnreadChange(item.dataset.changeId,item.dataset.changeEntry,item.dataset.changeAction).catch(err=>toast(err.message));
+  });
+  qs("#pushSaveDeviceName")?.addEventListener("click",saveDeviceName);
+  qs("#pushEnable")?.addEventListener("click",enablePush);
+  qs("#pushDisable")?.addEventListener("click",disablePush);
+  qs("#pushTest")?.addEventListener("click",sendPushTest);
   yearOptions(qs("#yearSelect"));
   yearOptions(qs("#filterYear"));
   upgradeDateInputs();
@@ -1524,6 +1775,8 @@ document.addEventListener("DOMContentLoaded", async ()=>{
   try{await loadPeriods();}catch(e){toast(e.message);}
   try{await loadCalendarSubscriptions();}catch(e){if(navigator.onLine) toast(e.message);}
   try{await loadConfig();}catch(e){if(navigator.onLine) toast(e.message);}
+  try{await registerDeviceOnServer();await loadUnreadChanges();await loadPushSettings();}catch(e){if(navigator.onLine) console.warn("Geräte-/Push-Status konnte nicht geladen werden",e);}
   showPage(rememberedPage(),{persist:false,scroll:false});
   applyOnlineState();
+  await handleChangesDeepLink();
 });

@@ -11,7 +11,7 @@
   <link rel="icon" type="image/png" sizes="64x64" href="/favicon-v17.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v17.png">
   <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-v17.png">
-  <link rel="stylesheet" href="/static/app.css?v=59">
+  <link rel="stylesheet" href="/static/app.css?v=60">
   <title>{{ title }}</title>
 </head>
 <body>
@@ -36,6 +36,12 @@
       <div class="stat"><strong id="statPeople">0</strong><span>Personen</span></div>
       <div class="stat"><strong id="statYear">0</strong><span>dieses Jahr</span></div>
     </div>
+
+    <button id="homeChangesLink" class="home-changes-link" type="button" hidden>
+      <span class="home-changes-bell" aria-hidden="true">🔔</span>
+      <span class="home-changes-copy"><strong id="homeChangesTitle">Neue Änderungen</strong><small id="homeChangesSubtitle">Anzeigen</small></span>
+      <span class="home-changes-arrow" aria-hidden="true">›</span>
+    </button>
 
     <div class="grid two">
       <div class="card">
@@ -135,10 +141,27 @@
       <details class="card settings-disclosure">
         <summary>App & Updates</summary>
         <div class="settings-disclosure-body">
-          <div class="row"><span>App-Version</span><span class="spacer"></span><b id="pwaAppVersion">v59</b></div>
+          <div class="row"><span>App-Version</span><span class="spacer"></span><b id="pwaAppVersion">v60</b></div>
           <p id="pwaUpdateStatus" class="small">Updates werden im Hintergrund geprüft.</p>
           <button id="pwaApplyUpdate" class="secondary full topgap" type="button" hidden>Jetzt aktualisieren</button>
           <p class="small">Neue Versionen werden zuerst vollständig lokal geladen. Die laufende Sitzung bleibt unverändert; automatisch gewechselt wird erst nach einem sicheren Neustart oder bewusst über den Button.</p>
+        </div>
+      </details>
+
+      <details class="card settings-disclosure">
+        <summary>Benachrichtigungen</summary>
+        <div class="settings-disclosure-body">
+          <p class="small">Dieses Gerät kann bei neuen, geänderten oder gelöschten Betreuungseinträgen benachrichtigt werden. Das Gerät, das die Änderung selbst speichert, wird nicht zusätzlich benachrichtigt.</p>
+          <label class="label" for="pushDeviceName">Name dieses Geräts</label>
+          <input id="pushDeviceName" class="input" maxlength="80" placeholder="z. B. Mein iPhone">
+          <div class="row topgap push-actions">
+            <button id="pushSaveDeviceName" class="secondary" type="button">Gerätename speichern</button>
+            <button id="pushEnable" class="primary" type="button">Push aktivieren</button>
+            <button id="pushDisable" class="secondary" type="button" hidden>Push deaktivieren</button>
+            <button id="pushTest" class="secondary" type="button" hidden>Test senden</button>
+          </div>
+          <p id="pushStatus" class="small topgap">Push-Status wird geprüft …</p>
+          <p class="small">Auf iPhone/iPad funktionieren Web-Push-Mitteilungen in der installierten Home-Screen-PWA. Der Web-Push-Schlüssel wird dauerhaft im Docker-Datenordner gespeichert.</p>
         </div>
       </details>
 
@@ -270,6 +293,15 @@
     <button class="navbtn" data-page="settings" onclick="showPage('settings')"><span class="ico">⚙</span>Setup</button>
   </div>
 </nav>
+
+<div id="changesModalBack" class="modalback changes-modalback" data-backdrop-close="changes">
+  <div class="modal changes-modal">
+    <div class="row"><h3>Neue Änderungen</h3><span class="spacer"></span><button id="changesClose" class="close" type="button" aria-label="Schließen">✕</button></div>
+    <p id="changesIntro" class="small">Neue Änderungen auf einem anderen Gerät.</p>
+    <div id="changesList" class="changes-list"></div>
+    <div class="row topgap"><button id="changesMarkAllRead" class="secondary" type="button">Alle als gelesen markieren</button><span class="spacer"></span><button id="changesOpenHistory" class="secondary" type="button">Alle Änderungen</button></div>
+  </div>
+</div>
 
 <div id="modalBack" class="modalback" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -421,6 +453,6 @@
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/static/app.js?v=59"></script>
+<script src="/static/app.js?v=60"></script>
 </body>
 </html>

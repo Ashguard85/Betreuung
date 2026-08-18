@@ -1,3 +1,16 @@
+# v60 – Push-Benachrichtigungen und neue Änderungen
+
+- Web Push pro Gerät für neue, geänderte, gelöschte und wiederhergestellte Betreuungseinträge.
+- Für diese Funktion müssen Pages PWA v60 und Docker Fullstack v60 gemeinsam verwendet werden.
+- Das Gerät, das eine Änderung selbst speichert, wird nicht zusätzlich benachrichtigt.
+- Startseite zeigt bei ungelesenen Änderungen einen direkten Link `🔔 N neue Änderungen`.
+- Änderungen-Inbox zeigt die neuen Einträge und öffnet vorhandene Termine direkt.
+- App-Icon-Badge wird mit der Zahl ungelesener Änderungen synchronisiert, soweit das Betriebssystem die Badging API unterstützt.
+- Setup → Benachrichtigungen: Gerätename, Push aktivieren/deaktivieren und Test-Mitteilung.
+- VAPID-Schlüsselpaar wird beim ersten Aktivieren automatisch unter `/app/data/webpush-vapid-private.pem` erzeugt und bleibt damit über Container-Neustarts erhalten.
+- Push-Subscriptions und Lesestatus sind gerätebezogen und werden nicht in JSON-Backups exportiert.
+- Die Geräte-ID wird als nicht-geheimer API-Queryparameter übertragen; dadurch entstehen keine zusätzlichen CORS-Header. Die bestehende Cloudflare-Option „OPTIONS zum Origin durchlassen“ bleibt für den Service-Token-Zugriff erforderlich.
+
 # v59 - Jahresplan-PDF nutzt die A4-Hoehe besser
 
 - Die 31 Tageszeilen im Jahres-/Mehrmonats-PDF werden jetzt dynamisch hoeher.

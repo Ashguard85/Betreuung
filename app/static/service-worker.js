@@ -1,4 +1,4 @@
-const APP_VERSION = "59";
+const APP_VERSION = "60";
 const VERSION = `betreuung-pwa-v${APP_VERSION}`;
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = "betreuung-private-data-v1";
@@ -7,8 +7,8 @@ const INDEX_URL = "/";
 
 const ESSENTIAL_SHELL = [
   "/",
-  "/static/app.css?v=59",
-  "/static/app.js?v=59",
+  "/static/app.css?v=60",
+  "/static/app.js?v=60",
   "/manifest.webmanifest"
 ];
 
@@ -144,6 +144,12 @@ self.addEventListener("fetch", event => {
     return;
   }
 
+  if (url.pathname === "/api/push/config" || url.pathname === "/api/changes/unread") {
+    // Device-specific notification state must never be replayed from an old API cache.
+    event.respondWith(fetch(request));
+    return;
+  }
+
   if (url.pathname.startsWith("/api/") && url.pathname !== "/api/config") {
     event.respondWith(networkFirstData(request));
     return;
@@ -160,4 +166,50 @@ self.addEventListener("fetch", event => {
       try { return await fetch(request); } catch (_error) { return Response.error(); }
     })());
   }
+});
+
+
+const NOTIFICATION_ICON = new URL("/pwa-icon-192-v17.png", self.location.origin).href;
+
+async function applyWorkerBadge(count){
+  const n=Math.max(0,Number(count)||0);
+  try{
+    if(n>0 && navigator.setAppBadge) await navigator.setAppBadge(n);
+    else if(n===0 && navigator.clearAppBadge) await navigator.clearAppBadge();
+  }catch(_e){}
+}
+
+self.addEventListener("push", event=>{
+  event.waitUntil((async()=>{
+    let data={};
+    try{data=event.data?event.data.json():{};}catch(_e){try{data={body:event.data?.text?.()||""};}catch(__e){data={};}}
+    const count=Math.max(0,Number(data.unread_count)||0);
+    await applyWorkerBadge(count);
+    const tag=data.type==="test"?"betreuungsplan-test":"betreuungsplan-changes";
+    await self.registration.showNotification(data.title||"Betreuungsplan",{
+      body:data.body||"Der Betreuungsplan wurde geändert.",
+      icon:NOTIFICATION_ICON,
+      tag,
+      renotify:true,
+      data:{url:data.url||"?changes=1",type:data.type||"changes",unread_count:count}
+    });
+    for(const client of await self.clients.matchAll({type:"window",includeUncontrolled:true})){
+      client.postMessage({type:"PUSH_CHANGES",unread_count:count});
+    }
+  })());
+});
+
+self.addEventListener("notificationclick", event=>{
+  event.notification.close();
+  event.waitUntil((async()=>{
+    const target=new URL(event.notification.data?.url||"?changes=1",self.registration.scope).href;
+    const windows=await self.clients.matchAll({type:"window",includeUncontrolled:true});
+    for(const client of windows){
+      if(new URL(client.url).origin===new URL(self.registration.scope).origin){
+        client.postMessage({type:"OPEN_CHANGES"});
+        if("focus" in client) return client.focus();
+      }
+    }
+    if(self.clients.openWindow) return self.clients.openWindow(target);
+  })());
 });

@@ -55,3 +55,7 @@ Die bisherige Variable `PWA_ALLOWED_ORIGIN` bleibt weiterhin unterstützt.
 ## Apple-Kalender-Direktimport
 
 Der Direktimport nutzt den vorhandenen read-only `/calendar.ics`-Bypass mit `ICAL_TOKEN`. `/export.ics` und `/api/entries/.../ics` bleiben hinter normalem Access/Login; dafür ist kein neuer Bypass nötig.
+
+## Web Push (v60)
+
+Die Geräte-ID wird ohne zusätzlichen Custom-Header als nicht-geheimer API-Queryparameter übertragen. In Cloudflare Access muss der anonyme `OPTIONS`-Preflight für die bestehenden Service-Token-Header weiterhin bis zum Origin durchgelassen werden. Für Web Push ist kein zusätzlicher öffentlich erreichbarer Backend-Endpunkt nötig; der Docker-Server sendet ausgehend direkt an die im Browser registrierten Push-Endpunkte. Der private VAPID-Schlüssel liegt persistent unter `/app/data/webpush-vapid-private.pem` und darf bei einer Servermigration nicht verloren gehen, solange bestehende Push-Subscriptions weiter funktionieren sollen.

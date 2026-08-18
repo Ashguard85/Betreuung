@@ -1,3 +1,4 @@
+import base64
 import csv
 import hmac
 import io
@@ -24,6 +25,16 @@ from flask import (
 import requests
 import qrcode
 
+try:
+    from pywebpush import webpush, WebPushException
+    from py_vapid import Vapid
+    from cryptography.hazmat.primitives import serialization
+except Exception:  # dependency/runtime diagnostics are surfaced through /api/push/config
+    webpush = None
+    WebPushException = Exception
+    Vapid = None
+    serialization = None
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -48,6 +59,20 @@ PWA_ALLOWED_ORIGINS = {
     for value in ([*PWA_ALLOWED_ORIGINS_RAW.split(","), PWA_ALLOWED_ORIGIN])
     if value.strip()
 }
+
+VAPID_PRIVATE_KEY_PATH = Path(os.getenv("VAPID_PRIVATE_KEY_FILE", str(DATA_DIR / "webpush-vapid-private.pem")))
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "").strip()
+if not VAPID_SUBJECT:
+    parsed_app_url = urlparse(APP_URL) if APP_URL else None
+    VAPID_SUBJECT = (
+        f"{parsed_app_url.scheme}://{parsed_app_url.netloc}"
+        if parsed_app_url and parsed_app_url.scheme == "https" and parsed_app_url.netloc
+        else "mailto:webpush@localhost.invalid"
+    )
+DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+push_key_lock = threading.Lock()
+_vapid_public_key = None
+
 
 if AUTH_ENABLED and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD muss gesetzt sein, wenn AUTH_ENABLED=true ist.")
@@ -294,10 +319,45 @@ def init_db():
           created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS devices (
+          device_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          created_history_id INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          device_id TEXT PRIMARY KEY,
+          endpoint TEXT NOT NULL UNIQUE,
+          p256dh TEXT NOT NULL,
+          auth TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_success_at TEXT NOT NULL DEFAULT '',
+          last_error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS history_reads (
+          device_id TEXT NOT NULL,
+          history_id INTEGER NOT NULL,
+          read_at TEXT NOT NULL,
+          PRIMARY KEY(device_id, history_id),
+          FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE,
+          FOREIGN KEY(history_id) REFERENCES history(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_reads_device ON history_reads(device_id, history_id);
         """)
         history_columns = {r["name"] for r in conn.execute("PRAGMA table_info(history)").fetchall()}
         if "before_snapshot" not in history_columns:
             conn.execute("ALTER TABLE history ADD COLUMN before_snapshot TEXT NOT NULL DEFAULT '{}'")
+        if "source_device_id" not in history_columns:
+            conn.execute("ALTER TABLE history ADD COLUMN source_device_id TEXT NOT NULL DEFAULT ''")
+        if "source_device_name" not in history_columns:
+            conn.execute("ALTER TABLE history ADD COLUMN source_device_name TEXT NOT NULL DEFAULT ''")
         # Backwards-compatible migration for databases created before timed entries existed.
         entry_columns = {r["name"] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
         if "all_day" not in entry_columns:
@@ -627,19 +687,192 @@ def set_setting(key, value):
 
 HISTORY_ENTRY_FIELDS = ("day", "end_day", "person_id", "person", "note", "all_day", "start_time", "end_time")
 
-def history_add(action, snapshot, entry_id=None, before_snapshot=None):
-    with db() as conn:
+def request_device_id():
+    value = (request.headers.get("X-Betreuung-Device-ID") or request.args.get("_device") or "").strip()
+    return value if DEVICE_ID_RE.fullmatch(value) else ""
+
+
+def device_name_with_conn(conn, device_id):
+    if not device_id:
+        return ""
+    row = conn.execute("SELECT name FROM devices WHERE device_id=?", (device_id,)).fetchone()
+    return str(row["name"] or "") if row else ""
+
+
+def ensure_device_with_conn(conn, device_id, name=""):
+    if not device_id or not DEVICE_ID_RE.fullmatch(device_id):
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = conn.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
+    clean_name = str(name or "").strip()[:80]
+    if not existing:
+        max_history = conn.execute("SELECT COALESCE(MAX(id),0) AS m FROM history").fetchone()["m"]
         conn.execute(
-            "INSERT INTO history(action,entry_id,snapshot,before_snapshot,created_at) VALUES(?,?,?,?,?)",
+            "INSERT INTO devices(device_id,name,created_history_id,created_at,updated_at) VALUES(?,?,?,?,?)",
+            (device_id, clean_name or "Dieses Gerät", int(max_history or 0), now, now),
+        )
+    elif clean_name and clean_name != existing["name"]:
+        conn.execute("UPDATE devices SET name=?,updated_at=? WHERE device_id=?", (clean_name, now, device_id))
+    return conn.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
+
+
+def ensure_vapid_key():
+    global _vapid_public_key
+    if _vapid_public_key:
+        return _vapid_public_key
+    if Vapid is None or serialization is None or webpush is None:
+        raise RuntimeError("Web-Push-Abhängigkeit pywebpush ist nicht verfügbar")
+    with push_key_lock:
+        if _vapid_public_key:
+            return _vapid_public_key
+        VAPID_PRIVATE_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        vapid = Vapid.from_file(str(VAPID_PRIVATE_KEY_PATH))
+        try:
+            os.chmod(VAPID_PRIVATE_KEY_PATH, 0o600)
+        except OSError:
+            pass
+        raw_public = vapid.public_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint,
+        )
+        _vapid_public_key = base64.urlsafe_b64encode(raw_public).rstrip(b"=").decode("ascii")
+        return _vapid_public_key
+
+
+def unread_change_count_with_conn(conn, device_id):
+    device = conn.execute("SELECT created_history_id FROM devices WHERE device_id=?", (device_id,)).fetchone()
+    if not device:
+        return 0
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS c
+          FROM history h
+         WHERE h.id > ?
+           AND COALESCE(h.source_device_id,'') <> ?
+           AND NOT EXISTS (
+               SELECT 1 FROM history_reads r
+                WHERE r.device_id=? AND r.history_id=h.id
+           )
+        """,
+        (int(device["created_history_id"] or 0), device_id, device_id),
+    ).fetchone()
+    return int(row["c"] or 0)
+
+
+def push_body_for_change(action, snapshot, aggregate_count=None):
+    if aggregate_count and aggregate_count > 1:
+        return f"{aggregate_count} neue Betreuungstermine wurden eingetragen."
+    person = str((snapshot or {}).get("person") or "Betreuung")
+    day = str((snapshot or {}).get("day") or "")
+    try:
+        day_label = date.fromisoformat(day).strftime("%d.%m.") if day else ""
+    except ValueError:
+        day_label = day
+    prefix = {
+        "created": "Neu",
+        "updated": "Geändert",
+        "deleted": "Gelöscht",
+        "restored": "Wiederhergestellt",
+    }.get(action, "Geändert")
+    return f"{prefix}: {person}{' · ' + day_label if day_label else ''}"
+
+
+def send_push_payload_to_subscriptions(payload, source_device_id=""):
+    if webpush is None:
+        return
+    try:
+        ensure_vapid_key()
+    except Exception as exc:
+        print(f"Web Push nicht verfügbar: {exc}")
+        return
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            """SELECT p.device_id,p.endpoint,p.p256dh,p.auth,d.name
+                   FROM push_subscriptions p
+                   JOIN devices d ON d.device_id=p.device_id
+                  WHERE p.enabled=1"""
+        ).fetchall()]
+    for sub in rows:
+        if source_device_id and sub["device_id"] == source_device_id:
+            continue
+        with db() as conn:
+            unread_count = unread_change_count_with_conn(conn, sub["device_id"])
+        if unread_count <= 0:
+            continue
+        outgoing = dict(payload)
+        outgoing["unread_count"] = unread_count
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": sub["endpoint"],
+                    "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                },
+                data=json.dumps(outgoing, ensure_ascii=False),
+                vapid_private_key=str(VAPID_PRIVATE_KEY_PATH),
+                vapid_claims={"sub": VAPID_SUBJECT},
+                ttl=86400,
+                timeout=8,
+            )
+            with db() as conn:
+                conn.execute(
+                    "UPDATE push_subscriptions SET last_success_at=?,last_error='',updated_at=? WHERE device_id=?",
+                    (datetime.now().isoformat(timespec="seconds"), datetime.now().isoformat(timespec="seconds"), sub["device_id"]),
+                )
+        except WebPushException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            with db() as conn:
+                if status in (404, 410):
+                    conn.execute("DELETE FROM push_subscriptions WHERE device_id=?", (sub["device_id"],))
+                else:
+                    conn.execute(
+                        "UPDATE push_subscriptions SET last_error=?,updated_at=? WHERE device_id=?",
+                        (str(exc)[:500], datetime.now().isoformat(timespec="seconds"), sub["device_id"]),
+                    )
+        except Exception as exc:
+            with db() as conn:
+                conn.execute(
+                    "UPDATE push_subscriptions SET last_error=?,updated_at=? WHERE device_id=?",
+                    (str(exc)[:500], datetime.now().isoformat(timespec="seconds"), sub["device_id"]),
+                )
+
+
+def queue_history_push(history_id, action, snapshot, source_device_id="", aggregate_count=None):
+    payload = {
+        "type": "changes",
+        "title": APP_TITLE,
+        "body": push_body_for_change(action, snapshot, aggregate_count=aggregate_count),
+        "history_id": int(history_id or 0),
+        "url": "?changes=1",
+    }
+    threading.Thread(
+        target=send_push_payload_to_subscriptions,
+        args=(payload, source_device_id),
+        name="web-push-change",
+        daemon=True,
+    ).start()
+
+
+def history_add(action, snapshot, entry_id=None, before_snapshot=None, notify=True, aggregate_count=None):
+    source_device_id = request_device_id()
+    with db() as conn:
+        source_device_name = device_name_with_conn(conn, source_device_id)
+        cur = conn.execute(
+            "INSERT INTO history(action,entry_id,snapshot,before_snapshot,source_device_id,source_device_name,created_at) VALUES(?,?,?,?,?,?,?)",
             (
                 action,
                 entry_id,
                 json.dumps(snapshot or {}, ensure_ascii=False),
                 json.dumps(before_snapshot or {}, ensure_ascii=False),
+                source_device_id,
+                source_device_name,
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
+        history_id = cur.lastrowid
         conn.execute("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 100)")
+    if notify:
+        queue_history_push(history_id, action, snapshot or {}, source_device_id, aggregate_count=aggregate_count)
+    return history_id
 
 def entry_snapshot_with_conn(conn, entry_id):
     r=conn.execute(
@@ -659,11 +892,220 @@ def entry_snapshots_differ(before, after):
     return any(before.get(key) != after.get(key) for key in HISTORY_ENTRY_FIELDS)
 
 
+@app.post("/api/devices/register")
+@login_required
+def api_device_register():
+    device_id = request_device_id()
+    if not device_id:
+        return jsonify({"error": "Ungültige Geräte-ID"}), 400
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()[:80]
+    with db() as conn:
+        device = ensure_device_with_conn(conn, device_id, name)
+        subscribed = conn.execute("SELECT 1 FROM push_subscriptions WHERE device_id=? AND enabled=1", (device_id,)).fetchone() is not None
+    return jsonify({"device_id": device_id, "name": device["name"], "push_subscribed": subscribed})
+
+
+@app.get("/api/push/config")
+@login_required
+def api_push_config():
+    device_id = request_device_id()
+    try:
+        public_key = ensure_vapid_key()
+        enabled = True
+        error = ""
+    except Exception as exc:
+        public_key = ""
+        enabled = False
+        error = str(exc)
+    device_name = ""
+    subscribed = False
+    if device_id:
+        with db() as conn:
+            device = ensure_device_with_conn(conn, device_id)
+            device_name = str(device["name"] or "") if device else ""
+            subscribed = conn.execute("SELECT 1 FROM push_subscriptions WHERE device_id=? AND enabled=1", (device_id,)).fetchone() is not None
+    return jsonify({
+        "enabled": enabled,
+        "public_key": public_key,
+        "device_name": device_name,
+        "subscribed": subscribed,
+        "error": error,
+    })
+
+
+@app.post("/api/push/subscribe")
+@login_required
+def api_push_subscribe():
+    device_id = request_device_id()
+    if not device_id:
+        return jsonify({"error": "Ungültige Geräte-ID"}), 400
+    payload = request.get_json(force=True)
+    subscription = payload.get("subscription") or {}
+    endpoint = str(subscription.get("endpoint") or "").strip()
+    keys = subscription.get("keys") or {}
+    p256dh = str(keys.get("p256dh") or "").strip()
+    auth = str(keys.get("auth") or "").strip()
+    name = str(payload.get("device_name") or "").strip()[:80]
+    if not endpoint.startswith("https://") or not p256dh or not auth:
+        return jsonify({"error": "Ungültige Push-Subscription"}), 400
+    ensure_vapid_key()
+    now = datetime.now().isoformat(timespec="seconds")
+    with db() as conn:
+        ensure_device_with_conn(conn, device_id, name)
+        # An endpoint belongs to exactly one local installation/device.
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint=? AND device_id<>?", (endpoint, device_id))
+        conn.execute(
+            """INSERT INTO push_subscriptions(device_id,endpoint,p256dh,auth,enabled,created_at,updated_at)
+               VALUES(?,?,?,?,1,?,?)
+               ON CONFLICT(device_id) DO UPDATE SET
+                 endpoint=excluded.endpoint,p256dh=excluded.p256dh,auth=excluded.auth,
+                 enabled=1,last_error='',updated_at=excluded.updated_at""",
+            (device_id, endpoint, p256dh, auth, now, now),
+        )
+    return jsonify({"ok": True})
+
+
+@app.post("/api/push/unsubscribe")
+@login_required
+def api_push_unsubscribe():
+    device_id = request_device_id()
+    if not device_id:
+        return jsonify({"error": "Ungültige Geräte-ID"}), 400
+    with db() as conn:
+        conn.execute("DELETE FROM push_subscriptions WHERE device_id=?", (device_id,))
+    return jsonify({"ok": True})
+
+
+@app.post("/api/push/test")
+@login_required
+def api_push_test():
+    device_id = request_device_id()
+    if not device_id:
+        return jsonify({"error": "Ungültige Geräte-ID"}), 400
+    with db() as conn:
+        row = conn.execute(
+            "SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE device_id=? AND enabled=1",
+            (device_id,),
+        ).fetchone()
+        unread = unread_change_count_with_conn(conn, device_id)
+    if not row:
+        return jsonify({"error": "Push ist auf diesem Gerät nicht aktiviert"}), 409
+    payload = {
+        "type": "test",
+        "title": APP_TITLE,
+        "body": "Push-Benachrichtigungen funktionieren auf diesem Gerät.",
+        "unread_count": unread,
+        "url": "?changes=1",
+    }
+    try:
+        ensure_vapid_key()
+        webpush(
+            subscription_info={"endpoint": row["endpoint"], "keys": {"p256dh": row["p256dh"], "auth": row["auth"]}},
+            data=json.dumps(payload, ensure_ascii=False),
+            vapid_private_key=str(VAPID_PRIVATE_KEY_PATH),
+            vapid_claims={"sub": VAPID_SUBJECT},
+            ttl=300,
+            timeout=8,
+        )
+        return jsonify({"ok": True})
+    except WebPushException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (404, 410):
+            with db() as conn:
+                conn.execute("DELETE FROM push_subscriptions WHERE device_id=?", (device_id,))
+        return jsonify({"error": f"Push-Test fehlgeschlagen: {str(exc)[:300]}"}), 502
+    except Exception as exc:
+        return jsonify({"error": f"Push-Test fehlgeschlagen: {str(exc)[:300]}"}), 502
+
+
+def unread_history_rows(device_id, limit=50):
+    with db() as conn:
+        device = ensure_device_with_conn(conn, device_id)
+        rows = conn.execute(
+            """
+            SELECT h.id,h.action,h.entry_id,h.snapshot,h.before_snapshot,
+                   h.source_device_id,h.source_device_name,h.created_at
+              FROM history h
+             WHERE h.id > ?
+               AND COALESCE(h.source_device_id,'') <> ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM history_reads r
+                    WHERE r.device_id=? AND r.history_id=h.id
+               )
+             ORDER BY h.id DESC
+             LIMIT ?
+            """,
+            (int(device["created_history_id"] or 0), device_id, device_id, int(limit)),
+        ).fetchall()
+        count = unread_change_count_with_conn(conn, device_id)
+    result = []
+    for row in rows:
+        try:
+            snapshot = json.loads(row["snapshot"] or "{}")
+        except Exception:
+            snapshot = {}
+        try:
+            before = json.loads(row["before_snapshot"] or "{}")
+        except Exception:
+            before = {}
+        result.append({
+            "id": row["id"], "action": row["action"], "entry_id": row["entry_id"],
+            "snapshot": snapshot if isinstance(snapshot, dict) else {},
+            "after": snapshot if isinstance(snapshot, dict) else {},
+            "before": before if isinstance(before, dict) else {},
+            "source_device_id": row["source_device_id"],
+            "source_device_name": row["source_device_name"],
+            "created_at": row["created_at"],
+        })
+    return count, result
+
+
+@app.get("/api/changes/unread")
+@login_required
+def api_changes_unread():
+    device_id = request_device_id()
+    if not device_id:
+        return jsonify({"error": "Ungültige Geräte-ID"}), 400
+    count, rows = unread_history_rows(device_id)
+    return jsonify({"count": count, "changes": rows})
+
+
+@app.post("/api/changes/read")
+@login_required
+def api_changes_read():
+    device_id = request_device_id()
+    if not device_id:
+        return jsonify({"error": "Ungültige Geräte-ID"}), 400
+    payload = request.get_json(silent=True) or {}
+    with db() as conn:
+        device = ensure_device_with_conn(conn, device_id)
+        now = datetime.now().isoformat(timespec="seconds")
+        if payload.get("all"):
+            max_history = conn.execute("SELECT COALESCE(MAX(id),0) AS m FROM history").fetchone()["m"]
+            conn.execute("UPDATE devices SET created_history_id=?,updated_at=? WHERE device_id=?", (int(max_history or 0), now, device_id))
+            conn.execute("DELETE FROM history_reads WHERE device_id=?", (device_id,))
+        else:
+            ids = payload.get("ids") or []
+            clean_ids = []
+            for value in ids[:100]:
+                try:
+                    clean_ids.append(int(value))
+                except (TypeError, ValueError):
+                    pass
+            conn.executemany(
+                "INSERT OR IGNORE INTO history_reads(device_id,history_id,read_at) VALUES(?,?,?)",
+                [(device_id, history_id, now) for history_id in clean_ids],
+            )
+    count, _ = unread_history_rows(device_id, limit=1)
+    return jsonify({"ok": True, "count": count})
+
+
 @app.get("/api/history")
 @login_required
 def api_history():
     with db() as conn:
-        rows = conn.execute("SELECT id,action,entry_id,snapshot,before_snapshot,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
+        rows = conn.execute("SELECT id,action,entry_id,snapshot,before_snapshot,source_device_id,source_device_name,created_at FROM history ORDER BY id DESC LIMIT 20").fetchall()
     result=[]
     for row in rows:
         try:
@@ -683,6 +1125,8 @@ def api_history():
             "snapshot":snapshot,
             "after":snapshot,
             "before":before_snapshot,
+            "source_device_id":row["source_device_id"],
+            "source_device_name":row["source_device_name"],
             "created_at":row["created_at"],
         })
     return jsonify(result)
@@ -1081,6 +1525,7 @@ def api_entries_batch_create():
     preview=batch_preview_data(batch)
     now = datetime.now().isoformat(timespec="seconds")
     created = 0
+    created_ids = []
     with db() as conn:
         for day in preview["create_days"]:
             entry_end_day, _ = resolve_entry_end_day(day, batch["all_day"], batch["start_time"], batch["end_time"], None)
@@ -1091,8 +1536,17 @@ def api_entries_batch_create():
             )
             if cur.rowcount == 1:
                 created += 1
+                created_ids.append(cur.lastrowid)
 
     if created:
+        last_history_id = None
+        last_snapshot = None
+        for entry_id in created_ids:
+            snapshot = entry_snapshot(entry_id)
+            last_snapshot = snapshot
+            last_history_id = history_add("created", snapshot, entry_id, notify=False)
+        if last_history_id and last_snapshot:
+            queue_history_push(last_history_id, "created", last_snapshot, request_device_id(), aggregate_count=created)
         backup_db("entry-batch")
 
     return jsonify({

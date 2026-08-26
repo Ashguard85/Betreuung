@@ -741,19 +741,30 @@ function yearMonthQuery(){
 function renderList(){
   const year=qs("#filterYear").value;
   const search=qs("#filterSearch").value.toLowerCase().trim();
+  const today=isoToday();
+  const currentYear=today.slice(0,4);
+  // Im aktuellen Jahr zeigt die fortlaufende Liste nur heute und die Zukunft.
+  // Ein bewusst ausgewähltes vergangenes Jahr bleibt als Historie vollständig sichtbar.
+  const hidePast=year===currentYear;
+
   let source=entries.slice();
   if(!exportPeopleAreAll()) source=source.filter(e=>exportPeople.includes(e.person));
   if(search) source=source.filter(e=>(e.note||"").toLowerCase().includes(search)||e.person.toLowerCase().includes(search));
 
   const rows=[];
   for(const e of source){
-    if(e.day.startsWith(year)) rows.push({day:e.day, kind:1, html:itemHtml(e)});
+    if(e.day.startsWith(year) && (!hidePast || e.day>=today)){
+      rows.push({day:e.day, kind:1, html:itemHtml(e)});
+    }
     for(const continuationDay of entryContinuationDays(e)){
-      if(continuationDay.startsWith(year)) rows.push({day:continuationDay, kind:0, html:continuationItemHtml(e,continuationDay)});
+      if(continuationDay.startsWith(year) && (!hidePast || continuationDay>=today)){
+        rows.push({day:continuationDay, kind:0, html:continuationItemHtml(e,continuationDay)});
+      }
     }
   }
   rows.sort((a,b)=>a.day.localeCompare(b.day)||a.kind-b.kind);
-  qs("#fullList").innerHTML=rows.length?rows.map(r=>r.html).join(""):'<div class="small">Keine Einträge.</div>';
+  const emptyText=hidePast?"Keine Einträge ab heute.":"Keine Einträge.";
+  qs("#fullList").innerHTML=rows.length?rows.map(r=>r.html).join(""):`<div class="small">${emptyText}</div>`;
 
   updateExportControls();
   const exportLabel=exportPeopleAreAll()?"alle Personen":exportPeople.length===1?exportPeople[0]:`${exportPeople.length} Personen`;
@@ -1290,7 +1301,7 @@ async function shareServerFile(url, fallbackName, mimeType, preparing="Datei wir
 }
 
 
-const PWA_APP_VERSION = "60";
+const PWA_APP_VERSION = "61";
 const PWA_UPDATE_RELOAD_KEY = "betreuung-pwa-update-reload";
 let pwaRegistration = null;
 let pwaWaitingWorker = null;

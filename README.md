@@ -1,3 +1,10 @@
+# v61 – Listenansicht ab heute
+
+- Im aktuellen Jahr zeigt die fortlaufende Liste standardmäßig nur Termine ab heute.
+- Mehrtägige Termine, die bereits vor heute begonnen haben, erscheinen ab heute als Fortsetzung.
+- Bei bewusst ausgewählten vergangenen Jahren bleibt die vollständige Historie sichtbar.
+- CSV/PDF/ICS-Exporte bleiben unverändert und richten sich weiterhin nach den bestehenden Exportfiltern.
+
 # v60 – Push-Benachrichtigungen und neue Änderungen
 
 - Web Push pro Gerät für neue, geänderte, gelöschte und wiederhergestellte Betreuungseinträge.

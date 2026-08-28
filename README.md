@@ -1,3 +1,45 @@
+# v64 – kompakte Push-Titel
+
+Die Push-Titel sind jetzt absichtlich kurz, damit iOS sie sauber mit seiner eigenen Absenderzeile kombiniert:
+
+- `Neuer Termin` → iOS zeigt z. B. `Neuer Termin from Betreuung`
+- `Änderung` → `Änderung from Betreuung`
+- `Löschung` → `Löschung from Betreuung`
+- `Wiederherstellung` → `Wiederherstellung from Betreuung`
+- Test → `Test from Betreuung`
+
+Der Detailtext bleibt darunter separat, z. B. `Vreni am 28.08.`.
+
+Nur das Docker-Backend wurde geändert; die Pages-PWA bleibt unverändert.
+
+# v63 – saubere Push-Kopfzeilen
+
+iOS ergänzt bei Web-Push selbst den Namen der sendenden PWA (z. B. `from Betreuung`).
+Darum wird der App-Titel nicht mehr zusätzlich als Push-Titel gesendet.
+
+Neue Push-Titel:
+- `Neuer Termin`
+- `Termin geändert`
+- `Termin gelöscht`
+- `Termin wiederhergestellt`
+- `Neue Termine`
+- Test: `Test erfolgreich`
+
+Der Haupttext enthält nur noch die eigentliche Information, z. B. `Vreni am 28.08.`.
+
+Nur das Docker-Backend wurde geändert; die Pages-PWA bleibt unverändert.
+
+# v62 – verständlichere Push-Texte
+
+- Test-Push: „Test erfolgreich – Benachrichtigungen sind auf diesem Gerät aktiviert.“
+- Neue Termine: „Neuer Termin: <Person> am <Datum>“
+- Änderungen: „Termin geändert: <Person> am <Datum>“
+- Löschungen: „Termin gelöscht: <Person> am <Datum>“
+- Wiederherstellungen: „Termin wiederhergestellt: <Person> am <Datum>“
+- Sammelmeldungen wurden ebenfalls sprachlich gekürzt.
+
+Nur die serverseitig erzeugten Push-Texte wurden geändert; die Pages-PWA bleibt unverändert.
+
 # v61 – Listenansicht ab heute
 
 - Im aktuellen Jahr zeigt die fortlaufende Liste standardmäßig nur Termine ab heute.

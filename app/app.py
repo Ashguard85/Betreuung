@@ -759,22 +759,28 @@ def unread_change_count_with_conn(conn, device_id):
     return int(row["c"] or 0)
 
 
+def push_title_for_change(action, aggregate_count=None):
+    if aggregate_count and aggregate_count > 1:
+        return "Neue Termine"
+    return {
+        "created": "Neuer Termin",
+        "updated": "Änderung",
+        "deleted": "Löschung",
+        "restored": "Wiederherstellung",
+    }.get(action, "Änderung")
+
+
 def push_body_for_change(action, snapshot, aggregate_count=None):
     if aggregate_count and aggregate_count > 1:
-        return f"{aggregate_count} neue Betreuungstermine wurden eingetragen."
+        return f"{aggregate_count} Termine wurden eingetragen."
     person = str((snapshot or {}).get("person") or "Betreuung")
     day = str((snapshot or {}).get("day") or "")
     try:
         day_label = date.fromisoformat(day).strftime("%d.%m.") if day else ""
     except ValueError:
         day_label = day
-    prefix = {
-        "created": "Neu",
-        "updated": "Geändert",
-        "deleted": "Gelöscht",
-        "restored": "Wiederhergestellt",
-    }.get(action, "Geändert")
-    return f"{prefix}: {person}{' · ' + day_label if day_label else ''}"
+    when = f" am {day_label}" if day_label else ""
+    return f"{person}{when}"
 
 
 def send_push_payload_to_subscriptions(payload, source_device_id=""):
@@ -839,7 +845,7 @@ def send_push_payload_to_subscriptions(payload, source_device_id=""):
 def queue_history_push(history_id, action, snapshot, source_device_id="", aggregate_count=None):
     payload = {
         "type": "changes",
-        "title": APP_TITLE,
+        "title": push_title_for_change(action, aggregate_count=aggregate_count),
         "body": push_body_for_change(action, snapshot, aggregate_count=aggregate_count),
         "history_id": int(history_id or 0),
         "url": "?changes=1",
@@ -993,8 +999,8 @@ def api_push_test():
         return jsonify({"error": "Push ist auf diesem Gerät nicht aktiviert"}), 409
     payload = {
         "type": "test",
-        "title": APP_TITLE,
-        "body": "Push-Benachrichtigungen funktionieren auf diesem Gerät.",
+        "title": "Test",
+        "body": "Benachrichtigungen sind auf diesem Gerät aktiviert.",
         "unread_count": unread,
         "url": "?changes=1",
     }
